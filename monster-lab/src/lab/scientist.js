@@ -230,6 +230,20 @@ export class Scientist {
     }
 
     root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+    // His own body as spheres riding on the skeleton, so arms and hands never
+    // pass through it (torso, pot belly, hunch, coat skirt, head, chin).
+    const sph = (obj, x, y, z, r) => ({ kind: 'sphere', obj, c: V(x, y, z), r, self: true });
+    this.selfShapes = [
+      sph(spine, 0, -0.14, 0, 0.25), // coat skirt over the hips
+      sph(spine, 0, 0.07, 0, 0.21),
+      sph(spine, 0, 0.25, 0, 0.22),
+      sph(spine, 0, 0.42, 0, 0.155),
+      sph(spine, 0, 0.14, 0.07, 0.19), // pot belly
+      sph(spine, 0.03, 0.42, -0.1, 0.16), // hunch
+      sph(head, 0, 0.27, -0.01, 0.25), // cranium
+      sph(head, 0, 0.075, 0.09, 0.09), // jaw and chin
+    ];
   }
 
   _buildHead(head, { skin, ruddy, hair, dark, tooth, brass }) {
@@ -524,38 +538,19 @@ export class Scientist {
     });
     this.root.updateMatrixWorld(true);
 
-    // Arms.
-    for (const k of ['R', 'L']) {
-      const arm = this.arms[k];
-      const h = p['h' + k];
-      const target = h.p.clone();
-      if (this.collide) this._keepOut(target, 0.07);
-      // Default elbows hang out and back; if that arm would pass through an
-      // obstacle, lift the elbows up and out like a surgeon reaching over.
-      const poles = [
-        this.local(p.rootPos, p.rootYaw, arm.side * 0.9, 0.9, -0.6),
-        this.local(p.rootPos, p.rootYaw, arm.side * 0.8, 2.0, -0.2),
-        this.local(p.rootPos, p.rootYaw, arm.side * 1.7, 1.5, 0.1),
-      ];
-      let clear = !this.collide;
-      for (let i = 0; i < poles.length && !clear; i++) {
-        solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
-        clear = !this._armHits(arm, target);
-      }
-      if (clear) {
-        if (!this.collide) solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[0]);
+    // Arms, with posture correction: if an arm would pass through his own
+    // head or chin (he leans over the slab with a very big head), he lifts his
+    // head back and, if that is not enough, straightens up a little.
+    this._solveArms(p);
+    for (let i = 0; i < 8 && this._armsHitHead(); i++) {
+      if (i % 2 === 0 || this.spine.rotation.x < 0.05) {
+        this.neck.rotation.x -= 0.1;
+        this.head.rotation.x -= 0.1;
       } else {
-        // Last resort: lift the hand until the whole arm passes over the obstacle.
-        for (let i = 0; i < 8 && !clear; i++) {
-          target.y += 0.05;
-          solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[1]);
-          clear = !this._armHits(arm, target);
-        }
+        this.spine.rotation.x -= 0.07;
       }
-      setWorldQuat(arm.hand, h.q, arm.fore);
-      const c = h.curl;
-      arm.fingers.forEach((f, i) => { f.rotation.x = -c * (i % 2 ? 1.25 : 1.0); });
-      arm.fingers.thumb.rotation.x = 0.4 + c * 0.5;
+      this.root.updateMatrixWorld(true);
+      this._solveArms(p);
     }
     // Legs: knees point forward.
     for (const k of ['R', 'L']) {
@@ -568,49 +563,140 @@ export class Scientist {
     this.root.updateMatrixWorld(true);
   }
 
+  _solveArms(p) {
+      for (const k of ['R', 'L']) {
+        const arm = this.arms[k];
+        const h = p['h' + k];
+        const target = h.p.clone();
+        // Keep the hand (and its fingertips) out of solids and out of himself.
+        this._keepOut(target, 0.06, h.q);
+        // Elbow placements to try, in order: hanging out and back, out to the
+        // side, lifted up and out (reaching over), forward and out.
+        const poles = [
+          this.local(p.rootPos, p.rootYaw, arm.side * 0.9, 0.9, -0.6),
+          this.local(p.rootPos, p.rootYaw, arm.side * 1.6, 0.9, -0.1),
+          this.local(p.rootPos, p.rootYaw, arm.side * 0.8, 2.0, -0.2),
+          this.local(p.rootPos, p.rootYaw, arm.side * 1.7, 1.5, 0.1),
+          this.local(p.rootPos, p.rootYaw, arm.side * 1.3, 1.1, 0.6),
+        ];
+        let clear = false;
+        for (let i = 0; i < poles.length && !clear; i++) {
+          solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
+          clear = !this._armHits(arm, target);
+        }
+        if (!clear) {
+          // Last resort: move the hand outward from his chest (and up, over any
+          // table or patient) until the whole arm is clear.
+          const chest = this.chest.getWorldPosition(V());
+          const out = target.clone().sub(chest).setY(0);
+          if (out.lengthSq() < 1e-4) out.copy(this.dir(p.rootYaw, arm.side, 0, 0.5));
+          out.normalize();
+          let best = poles[1];
+          for (let i = 0; i < 10 && !clear; i++) {
+            target.addScaledVector(out, 0.035);
+            target.y += 0.03; // a little higher too: forearms come down onto things more steeply
+            for (const pole of [poles[1], poles[3], poles[2]]) {
+              solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, pole);
+              if (!this._armHits(arm, target)) { clear = true; best = pole; break; }
+            }
+          }
+          if (!clear) solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, best);
+        }
+        setWorldQuat(arm.hand, h.q, arm.fore);
+        const c = h.curl;
+        arm.fingers.forEach((f, i) => { f.rotation.x = -c * (i % 2 ? 1.25 : 1.0); });
+        arm.fingers.thumb.rotation.x = 0.4 + c * 0.5;
+      }
+  }
+
+  _armsHitHead() {
+    const head = this.selfShapes.filter((o) => o.obj === this.head);
+    for (const k of ['R', 'L']) {
+      const arm = this.arms[k];
+      const s0 = arm.upper.getWorldPosition(V()), e = arm.fore.getWorldPosition(V()), w = arm.hand.getWorldPosition(V());
+      for (let i = 1; i <= 8; i++) {
+        for (const q of [s0.clone().lerp(e, i / 8), e.clone().lerp(w, i / 8)]) {
+          for (const o of head) if (this._hit(o, q, 0.02)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   gripWorld(key) { return this.arms[key].grip.getWorldPosition(V()); }
 
   // ------------------------------------------------------------ collision
-  // obstacles: [{ kind: 'box', min, max }] and
-  //            [{ kind: 'ellipsoid', obj (Object3D), rad (local radii) }]
-  _inside(p, margin) {
-    for (const o of this.obstacles || []) {
-      if (o.kind === 'box') {
-        if (p.x > o.min.x - margin && p.x < o.max.x + margin && p.z > o.min.z - margin && p.z < o.max.z + margin && p.y < o.max.y + margin && p.y > o.min.y) return o;
-      } else if (o.kind === 'ellipsoid') {
-        const l = o.obj.worldToLocal(p.clone());
-        const k = o.obj.getWorldScale(V()).x || 1;
-        const m = margin / k;
-        if ((l.x / (o.rad.x + m)) ** 2 + (l.y / (o.rad.y + m)) ** 2 + (l.z / (o.rad.z + m)) ** 2 < 1) return o;
-      }
+  // External obstacles (set by the Director):
+  //   { kind: 'box', min, max } and { kind: 'ellipsoid', obj, rad (local radii) }
+  // plus his own body (this.selfShapes, spheres on bones), which always applies.
+  // `external` false checks only the external obstacles; actions with
+  // `collide: false` (reaching into a wound) skip external ones only.
+  _shapes(external = true) {
+    const list = [...this.selfShapes];
+    if (external && this.collide) list.push(...(this.obstacles || []));
+    return list;
+  }
+
+  _hit(o, p, margin) {
+    if (o.kind === 'box') {
+      return p.x > o.min.x - margin && p.x < o.max.x + margin && p.z > o.min.z - margin && p.z < o.max.z + margin && p.y < o.max.y + margin && p.y > o.min.y;
     }
+    if (o.kind === 'sphere') {
+      return p.distanceTo(o.obj.localToWorld(o.c.clone())) < o.r + margin;
+    }
+    const l = o.obj.worldToLocal(p.clone());
+    const m = margin / (o.obj.getWorldScale(V()).x || 1);
+    return (l.x / (o.rad.x + m)) ** 2 + (l.y / (o.rad.y + m)) ** 2 + (l.z / (o.rad.z + m)) ** 2 < 1;
+  }
+
+  _inside(p, margin, external = true) {
+    for (const o of this._shapes(external)) if (this._hit(o, p, margin)) return o;
     return null;
   }
 
-  // Push a hand target out of any obstacle it is inside.
-  _keepOut(p, margin) {
-    for (let iter = 0; iter < 3; iter++) {
-      const o = this._inside(p, margin);
-      if (!o) return;
-      if (o.kind === 'box') { p.y = o.max.y + margin; continue; }
-      const l = o.obj.worldToLocal(p.clone());
-      const k = o.obj.getWorldScale(V()).x || 1;
-      const m = margin / k;
-      const r = V(o.rad.x + m, o.rad.y + m, o.rad.z + m);
-      const n = V(l.x / r.x, l.y / r.y, l.z / r.z);
-      const len = n.length() || 1;
-      n.multiplyScalar(1.02 / len);
-      p.copy(o.obj.localToWorld(V(n.x * r.x, n.y * r.y, n.z * r.z)));
+  // The smallest move that takes p out of shape o (plus margin).
+  _exit(o, p, margin) {
+    if (o.kind === 'box') return V(0, o.max.y + margin - p.y, 0);
+    if (o.kind === 'sphere') {
+      const c = o.obj.localToWorld(o.c.clone());
+      const d = p.clone().sub(c);
+      const len = d.length() || 1;
+      return d.multiplyScalar((o.r + margin) * 1.02 / len - 1);
+    }
+    const l = o.obj.worldToLocal(p.clone());
+    const m = margin / (o.obj.getWorldScale(V()).x || 1);
+    const r = V(o.rad.x + m, o.rad.y + m, o.rad.z + m);
+    const n = V(l.x / r.x, l.y / r.y, l.z / r.z);
+    n.multiplyScalar(1.02 / (n.length() || 1));
+    return o.obj.localToWorld(V(n.x * r.x, n.y * r.y, n.z * r.z)).sub(p);
+  }
+
+  // Push a hand target (and its fingertips, given the hand orientation) out
+  // of every shape it is inside.
+  _keepOut(p, margin, q = null) {
+    const tipOff = q ? V(0, -0.15, 0.02).applyQuaternion(q) : null;
+    for (let iter = 0; iter < 5; iter++) {
+      let moved = false;
+      for (const o of this._shapes()) {
+        if (this._hit(o, p, margin)) { p.add(this._exit(o, p, margin)); moved = true; }
+        if (tipOff) {
+          const tip = p.clone().add(tipOff);
+          if (this._hit(o, tip, margin * 0.6)) { p.add(this._exit(o, tip, margin * 0.6)); moved = true; }
+        }
+      }
+      if (!moved) return;
     }
   }
 
-  // Does the upper arm or forearm pass through an obstacle?
+  // Does the upper arm or forearm pass through anything (himself included)?
+  // The first stretch of the upper arm starts inside his shoulder, so skip it.
   _armHits(arm, wrist) {
     const s = arm.upper.getWorldPosition(V());
     const e = arm.fore.getWorldPosition(V());
-    for (let i = 1; i <= 5; i++) {
-      if (this._inside(s.clone().lerp(e, i / 5), 0.03)) return true;
-      if (i < 5 && this._inside(e.clone().lerp(wrist, i / 5), 0.03)) return true;
+    for (let i = 1; i <= 8; i++) {
+      const u = i / 8;
+      if (u > 0.3 && this._inside(s.clone().lerp(e, u), 0.035)) return true;
+      if (i < 8 && this._inside(e.clone().lerp(wrist, u), 0.03)) return true;
     }
     return false;
   }

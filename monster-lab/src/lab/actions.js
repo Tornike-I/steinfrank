@@ -334,10 +334,13 @@ export function makeActions(lab, sfx) {
         const off = w.dir.multiplyScalar(0.06);
         const inside = mid.clone().addScaledVector(n, 0.07);
         const high = mid.clone().addScaledVector(n, 0.45).add(V(-0.1, 0, -0.15));
-        const over = sci.local(workRoot(mid.x), 0, -0.25, 1.75, -0.35);
+        const over = sci.local(workRoot(mid.x), 0, -0.42, 1.72, -0.05); // wind up above the shoulder, not behind the hunch
         const hand = inside.clone().lerp(high, pull).lerp(over, wind);
         p.hR.p.copy(hand).sub(off);
         p.hL.p.copy(hand).add(off).add(V(0, -0.04 * pull, 0));
+        // Only the right hand winds up over the shoulder; the left lets go and
+        // stays in front instead of reaching across his body.
+        if (wind > 0) p.hL.p.lerp(sci.local(workRoot(mid.x), 0, 0.24, 1.0, 0.32), wind);
         if (t < 0.5) { p.hR.p.lerp(inside, dive); p.hL.p.lerp(inside, dive); }
         p.hR.q.copy(handQuat(V(0, -1, 0.2), V(1, 0, 0)));
         p.hL.q.copy(handQuat(V(0, -1, 0.2), V(-1, 0, 0)));
@@ -487,7 +490,7 @@ export function makeActions(lab, sfx) {
     const binTop = SPOTS.bin.clone().add(V(0, 0.55, 0));
     const root = V(1.2, 0, SPOTS.work.z);
     return {
-      name: 'scrap', duration: 2.9, blend: 0.3,
+      name: 'scrap', duration: 2.9, blend: 0.3, collide: false, // he hugs the body to carry it
       site: () => center(),
       events: [
         { t: 0, fn: () => empty() },
@@ -513,8 +516,8 @@ export function makeActions(lab, sfx) {
         const swing = seg(t, 1.25, 1.75);
         const L = (x, y, z) => sci.local(root, 0, x, y, z);
         const mid0 = c.clone().add(V(0, 0.1, -0.08));
-        const midLift = mid0.clone().add(V(-0.1, 0.35, -0.05));
-        const midSwing = L(-0.45, 1.5, 0.15);
+        const midLift = mid0.clone().add(V(-0.1, 0.16, 0.06));
+        const midSwing = L(-0.32, 1.22, 0.5); // carried low and forward, clear of his head and chest
         let mid = mid0.clone();
         if (t >= 0.6 && t < 1.75) mid = mid0.clone().lerp(midLift, lift).lerp(midSwing, swing);
         if (t >= 0.6 && t < 1.75) {
@@ -530,15 +533,15 @@ export function makeActions(lab, sfx) {
           patient.holder.position.copy(pos);
           patient.holder.quaternion.copy(releaseQuat).multiply(new THREE.Quaternion().setFromAxisAngle(V(0, 0, 1), u * 4));
         }
-        const spread = V(0.2, 0, 0);
-        const hm = t < 1.75 ? mid : L(-0.6, 1.3, 0.35);
+        const spread = V(0.25, 0, 0); // a wide grip keeps his arms beside, not in front of, his face
+        const hm = t < 1.75 ? mid : L(-0.34, 1.12, 0.58); // release low and forward, arms clear of his head
         p.hR.p.copy(mid0).sub(spread).lerp(hm.clone().sub(spread), t > 0.6 ? 1 : 0);
         p.hL.p.copy(mid0).add(spread).lerp(hm.clone().add(spread), t > 0.6 ? 1 : 0);
         if (t < 0.6) { p.hR.p.lerp(L(-0.25, 0.9, 0.12), 1 - grab); p.hL.p.lerp(L(0.25, 0.9, 0.12), 1 - grab); }
         p.hR.q.copy(handQuat(V(0.5, -1, 0.2), V(1, 0, 0)));
         p.hL.q.copy(handQuat(V(-0.5, -1, 0.2), V(-1, 0, 0)));
         p.hR.curl = p.hL.curl = t > 0.5 && t < 1.75 ? 0.9 : 0.3;
-        p.spineY = -0.6 * swing * (1 - seg(t, 2.0, 2.4));
+        p.spineY = -0.4 * swing * (1 - seg(t, 2.0, 2.4));
         p.jaw = t > 0.6 && t < 1.75 ? 0.35 : 0.05;
         p.brow = t < 1.75 ? 1 : -0.2;
         if (t > 2.3) {
@@ -671,12 +674,12 @@ export function makeActions(lab, sfx) {
         const wob = Math.sin(t * 13) * 0.025;
         // Twist toward wherever the jet is going.
         p.spineY = THREE.MathUtils.clamp(Math.atan2(aim.x - AT.x, aim.z - AT.z), -1.1, 1.1) * 0.7;
-        const nzPos = L(-0.08 + wob, 1.15 + wob, 0.42).add(V(Math.sin(p.spineY) * 0.3, 0, 0));
+        const nzPos = L(-0.1 + wob, 1.02 + wob, 0.46).add(V(Math.sin(p.spineY) * 0.3, 0, 0));
         const dir = aim.clone().sub(nzPos).normalize();
         handQuat(dir, V(1, 0, 0), p.hR.q);
         p.hR.p.copy(wristFor(nzPos, p.hR.q, V()));
         p.hR.curl = 0.9;
-        p.hL.p.copy(nzPos).addScaledVector(dir, -0.15).add(V(0.06, -0.05, 0));
+        p.hL.p.copy(nzPos).addScaledVector(dir, -0.12).add(V(0.2, -0.07, 0.12));
         handQuat(dir, V(-1, 0, 0), p.hL.q);
         p.hL.curl = 0.85;
         p.spineX = 0.15 + wob;
