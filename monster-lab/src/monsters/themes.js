@@ -309,7 +309,7 @@ export function scoreTopics(text) {
     scores[th.id] = s;
   }
   // Bare arithmetic is math even without keywords.
-  if (/\d\s*[-+*/x×÷]\s*\d/.test(text)) scores.math = (scores.math || 0) + 2;
+  if (/\d\s*[-+*/x×÷]\s*\d/.test(text) || /\d\s*%/.test(text)) scores.math = (scores.math || 0) + 2;
   return scores;
 }
 

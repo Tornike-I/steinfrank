@@ -380,7 +380,7 @@ export class ChatUI {
   _renderMic() {
     const def = state.mode === 'monsters' ? this.mon?.def : null;
     const mic = this.el.mic;
-    const canTalk = !!def && def.provider?.kind === 'frankenstein' && backend.connected;
+    const canTalk = !!def && def.provider?.kind === 'frankenstein';
     mic.hidden = !canTalk && !this.voice?.isOn(def);
     mic.dataset.state = this.voice?.isOn(def) ? this.voice.state : 'off';
     mic.title = mic.dataset.state === 'off' ? 'Talk to this monster' : 'Hang up';

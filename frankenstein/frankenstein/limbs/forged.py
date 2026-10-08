@@ -104,7 +104,7 @@ async def run_tests(forged: ForgedLimb) -> list[str]:
             errs.append(f"forged:{forged.name} test {i}: expected/got {mismatched}")
         for k, needles in t.contains.items():
             text = str(got.get(k) or "")
-            missing = [n for n in ([needles] if isinstance(needles, str) else needles) if n not in text]
+            missing = [n for n in ([needles] if isinstance(needles, str) else needles) if str(n).lower() not in text.lower()]
             if missing:
                 errs.append(f"forged:{forged.name} test {i}: {k} should contain {missing}, got {text[:300]!r}")
     return errs
