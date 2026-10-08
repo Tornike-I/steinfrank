@@ -143,6 +143,8 @@ resize();
 
 if (state.mode === 'monsters') den.setMonster(mon.def);
 ctrl.init();
+// Restored monsters are on the floor: start on the view that shows them.
+director._shot(director._idleShot(), { cut: true });
 ui.renderAll();
 F.watchHealth(() => ui.renderHeader());
 onExternalChange(() => ui.renderSidebar());
