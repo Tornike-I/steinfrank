@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monster Voice Test</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 820px; margin: 24px auto; padding: 0 16px; background: #111; color: #ddd; }
+  select, button, label { font: inherit; }
+  select, button { padding: 6px 10px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  #log { white-space: pre-wrap; background: #1b1b1b; padding: 12px; border-radius: 6px; min-height: 160px; font-family: ui-monospace, monospace; font-size: 13px; }
+  #report { background: #181818; padding: 12px 16px; border-radius: 6px; white-space: pre-wrap; }
+  audio { width: 100%; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Monster voice test</h1>
+<div class="row"><select id="monster"></select> <button id="go">Talk</button> <button id="stop" disabled>Hang up</button></div>
+<div class="row" id="dests"></div>
+<div id="audio"></div>
+<h3>Report</h3>
+<div id="report">(none yet)</div>
+<h3>Log</h3>
+<div id="log"></div>
+<script type="module">
+import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm";
+
+const $ = (id) => document.getElementById(id);
+const log = (...a) => { $("log").textContent += a.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" ") + "\n"; };
+const api = async (path, body) => {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  return r.json();
+};
+const range = (e, k, unit) => e.min[k] === e.max[k] ? `${e.max[k]} ${unit}` : `${e.min[k]}-${e.max[k]} ${unit}`;
+
+const monsters = await api("/monsters");
+for (const m of monsters) {
+  $("monster").add(new Option(`${m.name} (${range(m.estimate, "llm_tokens", "tok")}, ${range(m.estimate, "credits", "cr")})${m.has_voice ? "" : " - no voice"}`, m.id));
+}
+for (const d of await api("/destinations")) {
+  $("dests").insertAdjacentHTML("beforeend", `<label><input type="checkbox" value="${d.id}"> notify ${d.label} (${d.channel})</label>`);
+}
+const deliverTo = () => [...document.querySelectorAll("#dests input:checked")].map(i => i.value);
+
+function show(run) {
+  const out = run.output || {};
+  if (out.speech_audio_url) $("audio").innerHTML = `<audio controls src="${out.speech_audio_url}"></audio>`;
+  if (out.report) $("report").textContent = out.report;
+}
+
+let conv;
+$("go").onclick = async () => {
+  const m = monsters.find(x => x.id === $("monster").value);
+  const session = await api(`/monsters/${m.id}/voice-session`);
+  if (!session.signed_url) return log("no voice session:", session.detail ?? session);
+  await navigator.mediaDevices.getUserMedia({ audio: true });
+  conv = await Conversation.startSession({
+    signedUrl: session.signed_url,
+    clientTools: {
+      start_run: async (inputs) => {
+        const run = await api(`/monsters/${m.id}/runs`, { inputs, deliver_to: deliverTo(), notify_on_complete: deliverTo().length > 0 });
+        log("start_run", inputs, "->", run.id ?? run);
+        return JSON.stringify(run.id ? { run_id: run.id, status: run.status } : run);
+      },
+      check_run: async ({ run_id }) => {
+        const run = await api(`/runs/${run_id}`);
+        log("check_run", run.status, run.error ?? "");
+        show(run);
+        return JSON.stringify({
+          status: run.status, speech: run.output?.speech, error: run.error,
+          question: run.needs_input?.message ?? run.confirm?.message,
+        });
+      },
+      answer_input: async ({ run_id, answer }) => {
+        const run = await api(`/runs/${run_id}/inputs`, { answer });
+        log("answer_input", run.status ?? run);
+        return JSON.stringify({ status: run.status ?? run.detail });
+      },
+      confirm_spend: async ({ run_id, approve }) => {
+        const run = await api(`/runs/${run_id}/confirm`, { approve });
+        log("confirm_spend", approve, "->", run.status ?? run);
+        return JSON.stringify({ status: run.status ?? run.detail });
+      },
+    },
+    onMessage: (msg) => log(`${msg.source}: ${msg.message}`),
+    onStatusChange: (s) => log("status:", s.status ?? s),
+    onError: (e) => log("error:", e),
+  });
+  $("go").disabled = true; $("stop").disabled = false;
+};
+$("stop").onclick = async () => { await conv?.endSession(); $("go").disabled = false; $("stop").disabled = true; };
+</script>
+</body>
+</html>

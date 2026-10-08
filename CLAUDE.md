@@ -23,3 +23,12 @@ Hackathon project (~12h). **Frankenstein** is the builder that creates **monster
 ## Secrets
 
 Keys live in the root `.env` (gitignored): `SOKOSUMI_API_KEY`, `ELEVENLABS_API_KEY`. The ElevenLabs key is permission-scoped; creating agents via API needs the Agents permissions on it.
+
+## Frankenstein (`frankenstein/`)
+
+- A monster is a JSON spec (`frankenstein/spec.py`, examples in `monsters/`) run by a deterministic interpreter (`runtime.py`): sequential steps or `parallel` groups, `when` branches, bounded `for_each`, `{{memory.*}}` between scheduled runs, `{{run.now}}`. Outputs must include `speech` (spoken via ElevenLabs automatically, <= 900 chars) and `report` (markdown).
+- Forge pipeline `forge/pipeline.py`: moderation → policy check → design (`forge/designer_prompt.md`) → validate → budgets auto-fitted → dry run on the designer's examples (paid limbs mocked, plus a declined-paid pass) → speech review → draft → publish (+ private ElevenLabs agent).
+- Paid Sokosumi steps above `FRANK_CONFIRM_ABOVE_CREDITS` (100) pause at `needs_confirmation`; daily cap `FRANK_DAILY_CREDIT_CAP`.
+- Delivery: `channels.py` (ui, ntfy, email/Resend, slack, telegram, webhook). Recipients are registered destinations, never chosen by a spec. Watchers: `watches.py`.
+- Run from `frankenstein/`: `python -m pytest -q`, `python -m frankenstein.cli ...`, `python -m uvicorn frankenstein.api:app` (voice test page at `/dev/voice`).
+- Designer model `gpt-5.4-mini` (`FRANK_DESIGN_MODEL`); run-time llm steps `gpt-4.1-nano` (non-reasoning on purpose: no hidden tokens).
