@@ -180,6 +180,13 @@ body {
 #send:disabled { background: #4a463e; color: #2a2722; cursor: default; }
 #send:not(:disabled):active { transform: scale(0.92); }
 #send.is-stop { background: var(--text); color: #1a1815; }
+#mic {
+  flex: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid #5a5244; cursor: pointer;
+  background: transparent; color: var(--text); display: grid; place-items: center; transition: background 0.2s, box-shadow 0.2s;
+}
+#mic[data-state="connecting"] { opacity: 0.6; cursor: progress; }
+#mic[data-state="listening"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+#mic[data-state="speaking"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; box-shadow: 0 0 0 5px rgba(154, 255, 106, 0.25); }
 .disclaimer { text-align: center; color: #7f786b; font-size: 12px; padding-top: 8px; }
 
 /* Empty state: scientist, greeting, prompt — centred. */

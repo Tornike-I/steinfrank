@@ -13,12 +13,21 @@
   #log { white-space: pre-wrap; background: #1b1b1b; padding: 12px; border-radius: 6px; min-height: 160px; font-family: ui-monospace, monospace; font-size: 13px; }
   #report { background: #181818; padding: 12px 16px; border-radius: 6px; white-space: pre-wrap; }
   audio { width: 100%; margin-top: 8px; }
+  #face { --mouth: 0; width: 140px; height: 140px; border-radius: 40% 40% 45% 45%; background: #3d5a3a; position: relative; margin: 12px 0; transition: background .3s; }
+  #face[data-mode="listening"] { background: #3a4d5a; }
+  #face[data-mode="working"] { background: #5a4a2e; }
+  #face[data-mode="done"] { background: #2e5a3e; }
+  #face .eye { position: absolute; top: 38px; width: 22px; height: 22px; border-radius: 50%; background: #e8f060; }
+  #face .eye.l { left: 32px; } #face .eye.r { right: 32px; }
+  #face .mouth { position: absolute; left: 35px; right: 35px; bottom: 30px; height: calc(4px + var(--mouth) * 36px); border-radius: 8px; background: #1a1a1a; }
 </style>
 </head>
 <body>
 <h1>Monster voice test</h1>
 <div class="row"><select id="monster"></select> <button id="go">Talk</button> <button id="stop" disabled>Hang up</button></div>
 <div class="row" id="dests"></div>
+<div class="row"><button id="birth" disabled>Play birth scene</button></div>
+<div id="face" data-mode="idle"><div class="eye l"></div><div class="eye r"></div><div class="mouth"></div></div>
 <div id="audio"></div>
 <h3>Report</h3>
 <div id="report">(none yet)</div>
@@ -50,9 +59,62 @@ function show(run) {
   if (out.report) $("report").textContent = out.report;
 }
 
-let conv;
+// The real face listens to "monster:face" events: {mode: idle|listening|speaking|working|done, level: 0..1}.
+const face = { mode: "idle", level: 0 };
+function setFace(patch) {
+  Object.assign(face, patch);
+  $("face").dataset.mode = face.mode;
+  $("face").style.setProperty("--mouth", face.level.toFixed(3));
+  window.dispatchEvent(new CustomEvent("monster:face", { detail: { ...face } }));
+}
+
+const sfx = { arrive: new Audio(), working: new Audio(), done: new Audio() };
+sfx.working.loop = true;
+function loadSounds(m) {
+  for (const [k, a] of Object.entries(sfx)) a.src = m.voice?.sounds?.[k] ?? "";
+  $("birth").disabled = !m.voice?.birth_url;
+}
+const play = (a, volume = 0.6) => { if (a.src) { a.volume = volume; a.currentTime = 0; a.play().catch(() => {}); } };
+const busy = new Set(["queued", "running", "waiting"]);
+let working = false;
+function setWorking(on) {
+  working = on;
+  if (on && sfx.working.paused) play(sfx.working, 0.3);
+  if (!on) sfx.working.pause();
+}
+
+const watched = new Set();
+async function watchRun(runId) {
+  if (watched.has(runId)) return;
+  watched.add(runId);
+  for (;;) {
+    const run = await api(`/runs/${runId}`);
+    if (busy.has(run.status)) { setWorking(true); if (face.mode !== "speaking") setFace({ mode: "working" }); }
+    else {
+      setWorking(false);
+      if (run.status === "completed") { play(sfx.done); setFace({ mode: "done" }); }
+      if (!["needs_confirmation", "needs_input"].includes(run.status)) return;
+    }
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
+let monster = monsters.find(x => x.id === $("monster").value);
+if (monster) loadSounds(monster);
+$("monster").onchange = () => { monster = monsters.find(x => x.id === $("monster").value); loadSounds(monster); };
+$("birth").onclick = () => { if (monster?.voice?.birth_url) $("audio").innerHTML = `<audio controls autoplay src="${monster.voice.birth_url}"></audio>`; };
+
+let conv, raf;
+async function animate() {
+  if (!conv) return;
+  const level = Math.min(1, (await conv.getOutputVolume()) * 2.5);
+  setFace({ level });
+  sfx.working.volume = face.mode === "speaking" ? 0.08 : 0.3;
+  raf = requestAnimationFrame(animate);
+}
+
 $("go").onclick = async () => {
-  const m = monsters.find(x => x.id === $("monster").value);
+  const m = monster;
   const session = await api(`/monsters/${m.id}/voice-session`);
   if (!session.signed_url) return log("no voice session:", session.detail ?? session);
   await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -62,6 +124,7 @@ $("go").onclick = async () => {
       start_run: async (inputs) => {
         const run = await api(`/monsters/${m.id}/runs`, { inputs, deliver_to: deliverTo(), notify_on_complete: deliverTo().length > 0 });
         log("start_run", inputs, "->", run.id ?? run);
+        if (run.id) watchRun(run.id);
         return JSON.stringify(run.id ? { run_id: run.id, status: run.status } : run);
       },
       check_run: async ({ run_id }) => {
@@ -86,11 +149,18 @@ $("go").onclick = async () => {
     },
     onMessage: (msg) => log(`${msg.source}: ${msg.message}`),
     onStatusChange: (s) => log("status:", s.status ?? s),
+    onConnect: () => play(sfx.arrive),
+    onModeChange: ({ mode }) => setFace({ mode: mode === "speaking" ? "speaking" : working ? "working" : "listening" }),
     onError: (e) => log("error:", e),
   });
   $("go").disabled = true; $("stop").disabled = false;
+  animate();
 };
-$("stop").onclick = async () => { await conv?.endSession(); $("go").disabled = false; $("stop").disabled = true; };
+$("stop").onclick = async () => {
+  await conv?.endSession(); conv = null; cancelAnimationFrame(raf);
+  setWorking(false); setFace({ mode: "idle", level: 0 });
+  $("go").disabled = false; $("stop").disabled = true;
+};
 </script>
 </body>
 </html>

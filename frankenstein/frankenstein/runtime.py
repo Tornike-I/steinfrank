@@ -288,7 +288,10 @@ class Runner:
         if spec.speak and speech and not self.dry_run and tts.enabled():
             ctx = self._ctx(run, spec, "speech")
             try:
-                output["speech_audio_url"] = (await self._call(tts, {"text": speech}, ctx))["url"]
+                speak = {"text": speech, "model_id": config.SPEECH_TTS_MODEL}
+                if spec.voice.voice_id:
+                    speak["voice_id"] = spec.voice.voice_id
+                output["speech_audio_url"] = (await self._call(tts, speak, ctx))["url"]
                 run["usage"] = ctx.usage.as_dict()
             except Exception as e:
                 run["log"].append({"step": "speech", "event": "error", "detail": str(e)})

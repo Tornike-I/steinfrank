@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from .. import config, store
+from .. import config, store, voices
 from ..openai_client import client, sampling
 
 SYSTEM = (Path(__file__).with_name("designer_prompt.md")).read_text(encoding="utf-8")
@@ -36,7 +36,8 @@ def _examples() -> str:
 
 class Designer:
     def __init__(self, limbs: list[dict], agents: list[dict]):
-        self.messages = [{"role": "system", "content": SYSTEM + "\n" + _catalog_text(limbs, agents) + _examples()}]
+        system = SYSTEM + "\n" + voices.designer_text() + "\n\n" + _catalog_text(limbs, agents) + _examples()
+        self.messages = [{"role": "system", "content": system}]
         self.usage = 0
 
     async def _ask(self) -> dict:

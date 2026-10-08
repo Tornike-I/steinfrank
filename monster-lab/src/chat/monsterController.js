@@ -6,7 +6,8 @@
 import { state, save } from '../core/store.js';
 import { uid } from '../core/rng.js';
 import { getMonster, allMonsters } from '../monsters/registry.js';
-import { respond } from '../ai/assistants.js';
+import { respond, frankensteinSpec } from '../ai/assistants.js';
+import { monsterVoice } from '../audio/monsterVoice.js';
 
 export class MonsterController {
   constructor({ den, ui }) {
@@ -31,9 +32,16 @@ export class MonsterController {
   get awaitingAnswer() { return !!this.def && this.waiting.has(this.def.id); }
 
   select(id) {
+    const changed = state.selectedMonster !== id;
+    if (changed) this.onSelect?.(id);
     state.selectedMonster = id;
     save();
     this.den.setMonster(this.def);
+    if (changed) this._sounds(this.def).then((s) => monsterVoice.sound(s?.arrive));
+  }
+
+  async _sounds(def) {
+    try { return (await frankensteinSpec(def))?.voice?.sounds || null; } catch { return null; }
   }
 
   // Open a tab and ask in one go (used by the laboratory).
@@ -67,6 +75,34 @@ export class MonsterController {
     return true;
   }
 
+  // Runs started from a live voice call go through the normal chat path, so
+  // they show in the thread and the den; resolves with the backend run id.
+  startVoiceRun(inputs) {
+    return new Promise((resolve, reject) => {
+      const def = this.def;
+      if (!def || this.generating) return reject(new Error('This monster is busy with another answer.'));
+      def.chat ||= [];
+      def.chat.push({ id: uid('u'), role: 'user', content: Object.values(inputs).join(' · ') });
+      const msg = { id: uid('a'), role: 'assistant', content: '', status: 'pending', steps: [] };
+      def.chat.push(msg);
+      save();
+      this.ui.renderAll();
+      this._run(def, msg, JSON.stringify(inputs), { onRun: resolve, voiced: true })
+        .then(() => reject(new Error('The run did not start.')));
+    });
+  }
+
+  voiceAnswer(text) {
+    return this.awaitingAnswer ? this.send(text) : false;
+  }
+
+  voiceConfirm(approve) {
+    const msg = [...(this.def?.chat || [])].reverse().find((m) => m.confirm?.state === 'pending' && this.decisions.has(m.id));
+    if (!msg) return false;
+    this.decide(msg.id, approve);
+    return true;
+  }
+
   regenerate(msgId) {
     const def = this.def;
     if (!def || this.generating) return;
@@ -79,7 +115,7 @@ export class MonsterController {
     this._run(def, msg, prompt);
   }
 
-  async _run(def, msg, input) {
+  async _run(def, msg, input, { onRun, voiced = false } = {}) {
     const ctrl = new AbortController();
     this.gens.set(def.id, { msgId: msg.id, ctrl });
     msg.status = 'streaming';
@@ -88,8 +124,10 @@ export class MonsterController {
     const live = () => state.mode === 'monsters' && this.den.def?.id === def.id;
     const history = def.chat.slice(0, -1).map(({ role, content }) => ({ role, content }));
     try {
-      for await (const ev of respond(def, input, { signal: ctrl.signal, history })) {
+      const sounds = await this._sounds(def);
+      for await (const ev of respond(def, input, { signal: ctrl.signal, history, onRun })) {
         if (ev.type === 'step') {
+          if (live()) monsterVoice.startLoop(sounds?.working);
           msg.steps.push({ id: ev.step.id, label: ev.step.label, kind: ev.step.kind, limb: ev.step.limb, state: 'running' });
           if (live()) this.den.onStep(ev.step);
         } else if (ev.type === 'stepDone') {
@@ -106,7 +144,10 @@ export class MonsterController {
           this.decisions.set(msg.id, ev.decide);
         } else if (ev.type === 'speech') {
           msg.speech = ev.text;
-          if (ev.audio && state.settings.sound) new Audio(ev.audio).play().catch(() => {});
+          monsterVoice.stopLoop();
+          if (live()) monsterVoice.sound(sounds?.done);
+          // In a live voice call the agent reads the verdict itself.
+          if (!voiced) setTimeout(() => monsterVoice.speak(ev.audio), sounds?.done ? 1200 : 0);
         } else if (ev.type === 'token') {
           msg.content += ev.text;
           if (live()) this.den.onToken();
@@ -122,6 +163,7 @@ export class MonsterController {
       for (const s of msg.steps) if (s.state === 'running') s.state = 'cancelled';
       if (live()) this.den.onFail(stopped);
     } finally {
+      monsterVoice.stopLoop();
       if (this.gens.get(def.id)?.msgId === msg.id) this.gens.delete(def.id);
       if (this.waiting.get(def.id)?.msg === msg) this.waiting.delete(def.id);
       this.decisions.delete(msg.id);

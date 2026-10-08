@@ -1,4 +1,4 @@
-from .. import config
+from .. import config, voices
 from ..limbs import get_limb
 from ..limbs.forged import run_tests
 from ..refs import RefError, template_refs, when_refs
@@ -101,8 +101,19 @@ def _io_errors(spec: MonsterSpec) -> list[str]:
     return errs
 
 
+def _voice_errors(spec: MonsterSpec) -> list[str]:
+    known = voices.archetypes()
+    v = spec.voice
+    errs = [] if v.archetype in known else [f"voice.archetype {v.archetype!r} is not one of {', '.join(known)}"]
+    labels = [c.label for c in v.cast]
+    if len(set(labels)) != len(labels):
+        errs.append("voice.cast labels must be unique")
+    errs += [f"voice.cast {c.label!r}: archetype {c.archetype!r} is unknown" for c in v.cast if c.archetype not in known]
+    return errs
+
+
 async def validate(spec: MonsterSpec, agents: dict[str, dict] | None = None) -> list[str]:
-    errs = _policy_errors(spec) + _io_errors(spec)
+    errs = _policy_errors(spec) + _io_errors(spec) + _voice_errors(spec)
     caps = config.CAPS
     scope = _Scope(set((spec.inputs.get("properties") or {}).keys()))
     if len(spec.leaves()) > min(spec.policy.max_steps, caps["max_steps"]):

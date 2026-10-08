@@ -9,6 +9,16 @@ import { matchTheme, themeOf } from '../monsters/themes.js';
 import { findByTopic, draftAssistant, commitAssistant } from '../monsters/registry.js';
 import { limbLabel } from '../monsters/limbParts.js';
 import * as F from '../ai/frankenstein.js';
+import { monsterVoice } from '../audio/monsterVoice.js';
+
+// Each topic always gets the same kind of voice (archetypes: frankenstein/voices.json).
+const VOICE_FOR_TOPIC = {
+  weather: 'golem', meetings: 'butler', research: 'lich', writing: 'igor', math: 'gremlin', cooking: 'hag',
+  travel: 'brute', health: 'brute', music: 'igor', tech: 'swarm', history: 'lich', space: 'golem', money: 'gremlin',
+  sports: 'brute', movies: 'butler', animals: 'swarm', gardening: 'hag', language: 'butler', love: 'hag',
+  games: 'gremlin', generic: 'brute',
+};
+const isCzech = (text) => /[ěščřžůťďň]/i.test(text);
 
 // What we ask Frankenstein to build for a topic. A single free-text `question`
 // input keeps lab questions mappable onto every topic monster.
@@ -17,11 +27,12 @@ function forgeBrief(th, question) {
 Inputs: exactly one required string input named "question" (the user's question about ${th.label.toLowerCase()}, maxLength 500).
 Gather facts with free limbs (web_search, http_fetch) where they help, then compose a short spoken answer and a markdown report.
 Stay strictly on the topic of ${th.label.toLowerCase()}; politely decline anything else.
-Example question: "${question.replace(/"/g, "'").slice(0, 200)}"`;
+Example question: "${question.replace(/"/g, "'").slice(0, 200)}"
+Voice archetype: ${VOICE_FOR_TOPIC[th.id] || 'brute'}.${isCzech(question) ? ' The user writes in Czech: the monster speaks Czech (voice.language "cs").' : ''}`;
 }
 
-// Publish with an ElevenLabs voice agent? Needs the Agents permission on the key.
-const WITH_VOICE = import.meta.env.VITE_FRANK_VOICE === '1';
+// Publish with an ElevenLabs voice agent, sounds and birth scene? VITE_FRANK_VOICE=0 turns it off.
+const WITH_VOICE = import.meta.env.VITE_FRANK_VOICE !== '0';
 
 export class LabController {
   constructor({ director, creatures, ui, monsters }) {
@@ -93,6 +104,7 @@ export class LabController {
         if (res.status !== 'draft') throw new Error(`Frankenstein couldn't design it: ${(res.errors || []).slice(0, 2).join('; ') || res.status}`);
         const card = await F.publish(res.spec.id, WITH_VOICE);
         draft.provider = { kind: 'frankenstein', monsterId: card.id, name: card.name, purpose: card.purpose, inputs: card.inputs, voice: card.has_voice };
+        draft.birthUrl = card.voice?.birth_url || null;
         draft.limbs = card.limbs;
         return card.limbs;
       })()
@@ -112,6 +124,7 @@ export class LabController {
       this.ui.renderControls();
       return;
     }
+    monsterVoice.scene(draft.birthUrl);
     const a = commitAssistant(draft);
     this.busy = null;
     this.persistCreatures();

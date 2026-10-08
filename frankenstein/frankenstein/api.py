@@ -96,6 +96,7 @@ def _card(spec) -> dict:
         "id": spec.id, "name": spec.name, "version": spec.version, "purpose": spec.purpose,
         "inputs": spec.inputs, "estimate": estimate(spec).model_dump(), "observed": _observed(spec.id),
         "limbs": sorted({s.limb for s in spec.leaves()}), "has_voice": bool(spec.voice.elevenlabs_agent_id),
+        "voice": spec.voice.model_dump(include={"archetype", "language", "sounds", "birth_url"}),
     }
 
 

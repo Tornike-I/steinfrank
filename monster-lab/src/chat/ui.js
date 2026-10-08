@@ -20,6 +20,7 @@ const LAB_IDEAS = [
 ];
 
 const ICON = {
+  mic: '<svg viewBox="0 0 24 24" width="18" height="18"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   send: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   stop: '<svg viewBox="0 0 24 24" width="14" height="14"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/></svg>',
   copy: '<svg viewBox="0 0 24 24" width="16" height="16"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
@@ -34,7 +35,7 @@ export class ChatUI {
   constructor() {
     this.el = {
       app: $('#app'), main: $('#main'), list: $('#conv-list'), labTab: $('#lab-tab'), thread: $('#thread'), messages: $('#messages'),
-      form: $('#composer'), input: $('#prompt'), send: $('#send'), greeting: $('#greeting'), ideas: $('#ideas'), banner: $('#topic-banner'),
+      form: $('#composer'), input: $('#prompt'), send: $('#send'), mic: $('#mic'), greeting: $('#greeting'), ideas: $('#ideas'), banner: $('#topic-banner'),
       toggleSide: $('#toggle-sidebar'), toggleSide2: $('#toggle-sidebar-2'),
       sound: $('#sound'), settings: $('#settings'), pop: $('#settings-pop'), threshold: $('#threshold'),
       thresholdVal: $('#threshold-val'), count: $('#specimen-count'), model: $('#model'), disclaimer: $('#disclaimer'), backend: $('#backend-chip'),
@@ -46,9 +47,13 @@ export class ChatUI {
 
   get ctrl() { return state.mode === 'monsters' ? this.mon : this.lab; }
 
-  bind({ lab, mon, onSound, onThreshold, getCount, onMode, thumbnail }) {
-    Object.assign(this, { lab, mon, getCount, onMode, thumbnail });
+  bind({ lab, mon, voice, onSound, onThreshold, getCount, onMode, thumbnail }) {
+    Object.assign(this, { lab, mon, voice, getCount, onMode, thumbnail });
     const e = this.el;
+    e.mic.innerHTML = ICON.mic;
+    e.mic.addEventListener('click', async () => {
+      try { await this.voice.toggle(this.mon.def); } catch (err) { this.banner(`Couldn't start the voice call: ${esc(err.message)}`, { timeout: 7000 }); }
+    });
     e.form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       const c = this.ctrl;
@@ -141,7 +146,7 @@ export class ChatUI {
     if (lab) {
       e.greeting.textContent = this._greeting;
       e.input.placeholder = 'Ask anything — the doctor will build (or fetch) the right monster…';
-      e.disclaimer.textContent = 'Each topic gets its own monster. Dr. Stitchwick can make mistakes. Mostly on purpose.';
+      e.disclaimer.textContent = 'Each topic gets its own monster. Dr. Frankenstein can make mistakes. Mostly on purpose.';
     } else {
       const th = def ? themeOf(def.theme) : null;
       e.greeting.textContent = def ? `${def.name} ${th.intro}` : '';
@@ -367,8 +372,19 @@ export class ChatUI {
     b.disabled = !gen && !this.el.input.value.trim();
     if (state.mode === 'monsters' && this.mon?.awaitingAnswer) this.el.input.placeholder = `Answer ${this.mon.def.name}'s question…`;
     else if (state.mode === 'monsters' && this.mon?.def) this.el.input.placeholder = themeOf(this.mon.def.theme).placeholder;
+    this._renderMic();
     this._refreshActions();
     this.renderSidebarBusy();
+  }
+
+  _renderMic() {
+    const def = state.mode === 'monsters' ? this.mon?.def : null;
+    const mic = this.el.mic;
+    const canTalk = !!def && def.provider?.kind === 'frankenstein' && backend.connected;
+    mic.hidden = !canTalk && !this.voice?.isOn(def);
+    mic.dataset.state = this.voice?.isOn(def) ? this.voice.state : 'off';
+    mic.title = mic.dataset.state === 'off' ? 'Talk to this monster' : 'Hang up';
+    mic.setAttribute('aria-label', mic.title);
   }
 
   renderHeader() {
@@ -382,7 +398,7 @@ export class ChatUI {
     e.sound.setAttribute('aria-pressed', String(on));
     e.thresholdVal.textContent = state.settings.threshold;
     e.count.textContent = `${this.getCount ? this.getCount() : 0} / ${state.settings.threshold}`;
-    if (state.mode === 'lab') e.model.innerHTML = 'Stitchwick <em>Laboratory</em>';
+    if (state.mode === 'lab') e.model.innerHTML = 'Frankenstein <em>Laboratory</em>';
     else {
       const d = this.mon.def;
       e.model.innerHTML = d ? `${esc(themeOf(d.theme).label)} <em>${esc(d.name)}</em>` : '';

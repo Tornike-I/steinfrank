@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stitchwick Lab</title>
+    <title>Frankenstein Lab</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -15,7 +15,7 @@
     <div id="app">
       <aside id="sidebar" aria-label="Conversations">
         <div class="side-head">
-          <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Stitchwick</div>
+          <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Frankenstein</div>
           <button id="toggle-sidebar" class="icon-btn" title="Close sidebar" aria-label="Close sidebar">
             <svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 4v16" stroke="currentColor" stroke-width="1.8"/></svg>
           </button>
@@ -35,7 +35,7 @@
             <button id="toggle-sidebar-2" class="icon-btn glassy" title="Open sidebar" aria-label="Open sidebar">
               <svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 4v16" stroke="currentColor" stroke-width="1.8"/></svg>
             </button>
-            <div class="model glassy" id="model">Stitchwick <em>4o-rganic</em></div>
+            <div class="model glassy" id="model">Frankenstein <em>4o-rganic</em></div>
           </div>
 
           <div class="top-right">
@@ -77,9 +77,10 @@
         <div id="composer-wrap" class="column">
           <form id="composer" autocomplete="off">
             <textarea id="prompt" rows="1" placeholder="Describe the monster's job…" aria-label="Message"></textarea>
+            <button id="mic" type="button" aria-label="Talk to this monster" hidden></button>
             <button id="send" type="submit" aria-label="Send" disabled></button>
           </form>
-          <div class="disclaimer" id="disclaimer">Dr. Stitchwick can make mistakes. Mostly on purpose.</div>
+          <div class="disclaimer" id="disclaimer">Dr. Frankenstein can make mistakes. Mostly on purpose.</div>
         </div>
       </main>
     </div>

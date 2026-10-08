@@ -1,4 +1,4 @@
-// Dr. Stitchwick: a hunched puppet with a huge egg head, a brass loupe, a
+// Dr. Frankenstein: a hunched puppet with a huge egg head, a brass loupe, a
 // hunchback, a stained coat and enormous rubber gloves.
 //
 // Animation model: actions output a Pose (root transform, spine, look target,

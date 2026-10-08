@@ -32,10 +32,11 @@ Keys live in the root `.env` (gitignored): `SOKOSUMI_API_KEY`, `ELEVENLABS_API_K
 - Delivery: `channels.py` (ui, ntfy, email/Resend, slack, telegram, webhook). Recipients are registered destinations, never chosen by a spec. Watchers: `watches.py`.
 - Run from `frankenstein/`: `python -m pytest -q`, `python -m frankenstein.cli ...`, `python -m uvicorn frankenstein.api:app` (voice test page at `/dev/voice`).
 - Designer model `gpt-5.4-mini` (`FRANK_DESIGN_MODEL`); run-time llm steps `gpt-4.1-nano` (non-reasoning on purpose: no hidden tokens).
+- Voices: 8 archetypes with saved ElevenLabs voice IDs in `frankenstein/voices.json`; the designer picks `voice.archetype`, `language` (`en`/`cs`) and an optional `cast`. Publishing also generates per-monster sounds and a birth scene (`forge/theatrics.py`). ElevenLabs plan: 30 saved voices, 3 concurrent requests.
 
 ## Monster Lab UI (`monster-lab/`)
 
-- Browser front end (Vite + vanilla JS + Three.js, no backend yet). Stop-motion-style 3D: the scientist (Dr. Stitchwick) builds one persistent **topic assistant monster** per broad topic; each gets its own tab with a chat. Full doc: `monster-lab/README.md`.
+- Browser front end (Vite + vanilla JS + Three.js, no backend yet). Stop-motion-style 3D: the scientist (Dr. Frankenstein) builds one persistent **topic assistant monster** per broad topic; each gets its own tab with a chat. Full doc: `monster-lab/README.md`.
 - Run: `cd monster-lab && npm install && npm run dev` (`npm run build` for a static bundle). `?debug=stage` shows the 3D stage full-window; `window.lab` exposes internals.
 - Flow: a Laboratory question → `matchTheme()` topic detection (`src/monsters/themes.js`, 20 topics) → new topic: short surgery cinematic (`director.create`) then the tab opens and answers; existing topic: its wandering counterpart charges the screen and screams (`director.summon`), then its tab answers. Follow-ups in a tab never trigger surgery.
 - Assistants (`src/monsters/registry.js`, persisted in localStorage `stitchwick-lab.v1`): `{ id, theme, name, seed, instructions, provider, chat }`. One per topic; the seed + topic rebuilds the identical monster everywhere (slab, wandering, den, portrait).

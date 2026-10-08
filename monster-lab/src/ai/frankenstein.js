@@ -55,9 +55,11 @@ async function req(path, { method = 'GET', body, signal, timeout } = {}) {
 
 export const health = () => req('/monsters', { timeout: 2500 }).then(() => true, () => false);
 export const forge = (description, signal) => req('/forge', { method: 'POST', body: { description }, signal });
-export const publish = (id, voice = false) => req(`/monsters/${encodeURIComponent(id)}/publish`, { method: 'POST', body: { voice } });
+export const publish = (id, voice = true) => req(`/monsters/${encodeURIComponent(id)}/publish`, { method: 'POST', body: { voice } });
 export const getMonster = (id) => req(`/monsters/${encodeURIComponent(id)}`);
 export const startRun = (id, inputs) => req(`/monsters/${encodeURIComponent(id)}/runs`, { method: 'POST', body: { inputs } });
+export const getRun = (runId) => req(`/runs/${runId}`);
+export const voiceSession = (id) => req(`/monsters/${encodeURIComponent(id)}/voice-session`);
 export const answer = (runId, text) => req(`/runs/${runId}/inputs`, { method: 'POST', body: { answer: text } });
 export const confirm = (runId, approve) => req(`/runs/${runId}/confirm`, { method: 'POST', body: { approve } });
 export const artifactUrl = (url) => (url && url.startsWith('/') ? BASE + url : url);

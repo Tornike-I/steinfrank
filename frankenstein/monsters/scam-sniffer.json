@@ -379,6 +379,16 @@
   },
   "voice": {
     "elevenlabs_agent_id": "agent_4601m4end21sek09gw6xyx4gc0sj",
-    "first_message": "I’m checking the domain now. I’ll judge its age, HTTPS, and search reputation."
+    "first_message": "I’m checking the domain now. I’ll judge its age, HTTPS, and search reputation.",
+    "archetype": "hag",
+    "language": "en",
+    "cast": [],
+    "voice_id": "lOcBOvRcIXS7yTaPAHak",
+    "sounds": {
+      "arrive": "/artifacts/monsters/scam-sniffer/v2/arrive.mp3",
+      "working": "/artifacts/monsters/scam-sniffer/v2/working.mp3",
+      "done": "/artifacts/monsters/scam-sniffer/v2/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/scam-sniffer/v2/birth.mp3"
   }
 }

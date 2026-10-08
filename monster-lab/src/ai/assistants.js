@@ -52,12 +52,19 @@ export function mapInputs(schema, text) {
 
 const specCache = new Map();
 
-async function* frankensteinRun(assistant, input, { signal }) {
-  const id = assistant.provider.monsterId;
+export async function frankensteinSpec(assistant) {
+  const id = assistant?.provider?.kind === 'frankenstein' && assistant.provider.monsterId;
+  if (!id) return null;
   if (!specCache.has(id)) specCache.set(id, await F.getMonster(id));
-  const spec = specCache.get(id);
+  return specCache.get(id);
+}
+
+async function* frankensteinRun(assistant, input, { signal, onRun }) {
+  const id = assistant.provider.monsterId;
+  const spec = await frankensteinSpec(assistant);
   const leaves = leavesOf(spec);
   const run = await F.startRun(id, mapInputs(spec.inputs, input));
+  onRun?.(run.id);
 
   // Funnel SSE updates into this generator.
   const queue = [];

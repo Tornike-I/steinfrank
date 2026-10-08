@@ -73,9 +73,27 @@ class Safety(BaseModel):
     notes: str = ""
 
 
+class CastMember(BaseModel):
+    label: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    archetype: str
+    role: str
+
+
+class Sounds(BaseModel):
+    arrive: str | None = None
+    working: str | None = None
+    done: str | None = None
+
+
 class Voice(BaseModel):
     elevenlabs_agent_id: str | None = None
     first_message: str = ""
+    archetype: str = "brute"
+    language: Literal["en", "cs"] = "en"
+    cast: list[CastMember] = Field([], max_length=2)
+    voice_id: str | None = None
+    sounds: Sounds = Sounds()
+    birth_url: str | None = None
 
 
 class MonsterSpec(BaseModel):

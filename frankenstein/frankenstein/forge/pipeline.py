@@ -6,10 +6,10 @@ from dataclasses import asdict, dataclass, field
 
 from pydantic import ValidationError
 
-from .. import config, safety, store
+from .. import config, safety, store, voices
 from ..openai_client import client, sampling
 from ..spec import MonsterSpec, Safety
-from . import voice
+from . import theatrics, voice
 from .catalog import limb_catalog, sokosumi_agents
 from .designer import Designer
 from .estimator import estimate
@@ -168,6 +168,23 @@ async def publish(raw: dict, with_voice: bool = True) -> MonsterSpec:
     if spec.safety.verdict != "allow":
         raise ValueError("monster did not pass the safety check")
     if with_voice:
-        spec.voice.elevenlabs_agent_id = await voice.create_agent(spec)
+        await dress(spec, store.load_monster(spec.id))
     store.save_monster(spec)
     return spec
+
+
+async def dress(spec: MonsterSpec, previous: MonsterSpec | None):
+    """A monster keeps its sounds and birth scene across re-publishes unless its archetype changed."""
+    v = spec.voice
+    v.voice_id = voices.pick_voice(v.archetype, spec.id)
+    same = previous is not None and previous.voice.archetype == v.archetype
+    if same:
+        v.sounds, v.birth_url = previous.voice.sounds, previous.voice.birth_url
+    if not v.sounds.arrive:
+        v.sounds = await theatrics.make_sounds(spec)
+    if not v.birth_url:
+        try:
+            v.birth_url = await theatrics.make_birth(spec)
+        except Exception as e:
+            log.warning("birth scene for %s failed: %s", spec.id, e)
+    v.elevenlabs_agent_id = await voice.create_agent(spec, previous.voice.elevenlabs_agent_id if previous else None)

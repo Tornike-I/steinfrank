@@ -33,6 +33,7 @@ MODERATION_MODEL = env("MODERATION_MODEL", "omni-moderation-latest")
 VOICE_LLM = env("MONSTER_VOICE_LLM", "gemini-2.5-flash")
 VOICE_ID = env("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 TTS_MODEL = env("ELEVENLABS_TTS_MODEL", "eleven_flash_v2_5")
+SPEECH_TTS_MODEL = env("ELEVENLABS_SPEECH_MODEL", "eleven_v3")
 USER_AGENT = env("FRANK_USER_AGENT", "SteinfrankMonster/1.0 (hackathon workflow bot)")
 PUBLIC_BASE_URL = env("FRANK_PUBLIC_BASE_URL", "http://localhost:8000")
 

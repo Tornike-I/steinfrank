@@ -369,6 +369,7 @@ export class Den {
     const s = this.state;
     s.verbW = Math.min(1, s.verbW + step * 3.5);
     s.talk = Math.max(0, s.talk - step * 4);
+    if (this.voiceLevel) s.talk = Math.max(s.talk, this.voiceLevel());
     animateMonster(this.m, this.t, { ...s, walk: 0, excite: 0 });
     if (s.verb === 'greet' || s.verb === 'cheer') this.m.root.position.y = Math.abs(Math.sin(this.t * 7)) * 0.05 * this.h * s.verbW;
     else this.m.root.position.y = 0;

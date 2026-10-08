@@ -25,7 +25,8 @@
     "max_llm_tokens": 3500,
     "max_steps": 6,
     "max_images": 0,
-    "max_tts_chars": 1200
+    "max_tts_chars": 1200,
+    "max_notifications": 0
   },
   "steps": [
     {
@@ -49,7 +50,6 @@
     {
       "id": "sum",
       "limb": "llm",
-      "when": "steps.clean.chars > 200",
       "args": {
         "prompt": "Page title: {{steps.page.title}}\n\nRead the page below. Return speech: exactly three plain sentences for someone listening (no lists, no markdown, no URLs). Return report: a markdown summary with a heading, 4-6 bullet points of the key facts, and nothing else.\n\n{{steps.clean.text}}",
         "max_tokens": 450,
@@ -65,6 +65,7 @@
           }
         }
       },
+      "when": "steps.clean.chars > 200",
       "note": "The only step that needs language understanding"
     },
     {
@@ -84,6 +85,7 @@
     "title": "{{steps.page.title}}",
     "url": "{{steps.page.url}}"
   },
+  "speak": true,
   "forged_limbs": [
     {
       "name": "trim_text",
@@ -99,7 +101,8 @@
             "text": "This is a sentence that is long enough to be kept as content.",
             "chars": 61,
             "too_short": true
-          }
+          },
+          "contains": {}
         },
         {
           "args": {
@@ -109,7 +112,8 @@
           "expect": {
             "text": "",
             "chars": 0
-          }
+          },
+          "contains": {}
         }
       ]
     },
@@ -127,7 +131,8 @@
           "expect": {
             "speech": "I fetched X, but there was too little text on it to summarize.",
             "note": "too short"
-          }
+          },
+          "contains": {}
         },
         {
           "args": {
@@ -138,17 +143,55 @@
           "expect": {
             "speech": "Hi.",
             "note": ""
-          }
+          },
+          "contains": {}
         }
       ]
     }
   ],
-  "voice": {
-    "first_message": "Grr... give me a web page and I will read it to you."
-  },
   "examples": [
     {
       "url": "https://www.gutenberg.org/ebooks/84"
     }
-  ]
+  ],
+  "estimate": {
+    "min": {
+      "llm_tokens": 0,
+      "credits": 0.0,
+      "seconds": 5.4,
+      "images": 0,
+      "tts_chars": 100
+    },
+    "max": {
+      "llm_tokens": 1340,
+      "credits": 0.0,
+      "seconds": 8.4,
+      "images": 0,
+      "tts_chars": 900
+    }
+  },
+  "safety": {
+    "verdict": "allow",
+    "notes": "hand-written monster"
+  },
+  "voice": {
+    "elevenlabs_agent_id": "agent_4601m4es4rsdf9na1c83daapmeqq",
+    "first_message": "Grrr... Dej mi adresu webové stránky a já ti ji přečtu.",
+    "archetype": "golem",
+    "language": "cs",
+    "cast": [
+      {
+        "label": "pebble",
+        "archetype": "gremlin",
+        "role": "a tiny pebble gremlin living on the golem's shoulder who now and then adds one squeaky comment"
+      }
+    ],
+    "voice_id": "elfiDKtwo000IOWXoY4K",
+    "sounds": {
+      "arrive": "/artifacts/monsters/page-narrator/v1/arrive.mp3",
+      "working": "/artifacts/monsters/page-narrator/v1/working.mp3",
+      "done": "/artifacts/monsters/page-narrator/v1/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/page-narrator/v1/birth.mp3"
+  }
 }

@@ -1,7 +1,7 @@
-# Monster Lab (Stitchwick Laboratory)
+# Monster Lab (Frankenstein Laboratory)
 
 The visual front end for Steinfrank. It's a browser app where a stop-motion-style
-mad scientist, Dr. Stitchwick, builds a **topic-specific assistant monster**
+mad scientist, Dr. Frankenstein, builds a **topic-specific assistant monster**
 for each broad subject you ask about. Each monster then lives in its own tab
 with its own conversation. While it works, it acts out each workflow step so
 there's something fun to watch.

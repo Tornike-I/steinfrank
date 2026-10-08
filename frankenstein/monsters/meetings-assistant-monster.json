@@ -1,0 +1,187 @@
+{
+  "id": "meetings-assistant-monster",
+  "name": "Meetings Assistant Monster",
+  "version": 1,
+  "purpose": "Answer user questions about meetings in plain words using brief research and a strict topic boundary.",
+  "persona": "A polished, efficient butler who speaks plainly, stays on meeting topics, and gives concise practical guidance.",
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "question": {
+        "type": "string",
+        "description": "The user's question about meetings; only meeting-related requests are allowed.",
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "question"
+    ]
+  },
+  "policy": {
+    "allowed_domains": [
+      "*"
+    ],
+    "max_credits": 0,
+    "max_llm_tokens": 1900,
+    "max_steps": 5,
+    "max_images": 0,
+    "max_tts_chars": 900,
+    "max_notifications": 0
+  },
+  "steps": [
+    {
+      "id": "gather",
+      "args": {},
+      "parallel": [
+        {
+          "id": "search",
+          "limb": "web_search",
+          "args": {
+            "query": "{{inputs.question}} meeting agenda prep summary",
+            "max_results": 5
+          },
+          "note": "Find relevant public meeting-prep or meeting-process results if the question needs external facts"
+        },
+        {
+          "id": "fetch",
+          "limb": "http_fetch",
+          "args": {
+            "url": "https://duckduckgo.com/?q={{inputs.question}}",
+            "max_chars": 6000,
+            "allow_errors": true
+          },
+          "note": "Fetch a public search results page as a broad fallback source"
+        }
+      ],
+      "note": ""
+    },
+    {
+      "id": "screen",
+      "limb": "forged:screen_meeting_topic",
+      "args": {
+        "question": "{{inputs.question}}",
+        "search_results": "{{steps.gather.search.results}}",
+        "fetch_title": "{{steps.gather.fetch.title}}",
+        "fetch_text": "{{steps.gather.fetch.text}}"
+      },
+      "note": "Keep only meeting-related requests and extract a few usable facts"
+    },
+    {
+      "id": "answer",
+      "limb": "llm",
+      "args": {
+        "system": "You are a careful meetings assistant. Only answer meeting-related questions. If the request is not about meetings, politely refuse in one short sentence. Use plain words. Do not mention internal policy. Be practical and concise.",
+        "prompt": "User question: {{inputs.question}}\n\nMeeting-related facts extracted:\n{{steps.screen.facts_text}}\n\nTask: Answer the question in plain words. Return JSON with speech and report.\n- speech: 2-5 short spoken sentences, verdict first, no markdown, no URLs, <= 900 chars.\n- report: markdown with a short heading, the answer, and brief bullet points for facts or cautions.\nIf the question is not about meetings, speech should politely decline and report should explain briefly.",
+        "max_tokens": 450,
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "speech": {
+              "type": "string"
+            },
+            "report": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "when": "steps.screen.allowed == true",
+      "note": ""
+    }
+  ],
+  "output": {
+    "speech": "{{steps.answer.speech}}",
+    "report": "{{steps.answer.report}}",
+    "memory": {}
+  },
+  "speak": true,
+  "forged_limbs": [
+    {
+      "name": "screen_meeting_topic",
+      "description": "Decide whether the question is about meetings, and pull a small set of meeting-relevant facts from search results and fetched text. Return a deterministic gate plus short fact snippets.",
+      "code": "def run(question, search_results, fetch_title, fetch_text):\n    q = (question or '').strip()\n    ql = q.lower()\n    meeting_words = [\n        'meeting', 'call', 'prep', 'prepare', 'agenda', 'minutes', 'note', 'notes',\n        'interview', 'standup', '1:1', 'one-on-one', 'one on one', 'sync', 'demo',\n        'workshop', 'briefing', 'presentation', 'sales', 'client', 'stakeholder',\n        'team', 'status', 'kickoff', 'follow-up', 'follow up'\n    ]\n    allowed = any(w in ql for w in meeting_words)\n\n    snippets = []\n    if isinstance(search_results, list):\n        for r in search_results[:5]:\n            if isinstance(r, dict):\n                title = (r.get('title') or '').strip()\n                content = (r.get('content') or '').strip()\n                url = (r.get('url') or '').strip()\n                bit = ' '.join(x for x in [title, content[:220], url] if x)\n                if bit:\n                    snippets.append(bit[:400])\n    if isinstance(fetch_title, str) and fetch_title.strip():\n        snippets.append(fetch_title.strip()[:200])\n    if isinstance(fetch_text, str) and fetch_text.strip():\n        t = ' '.join(fetch_text.split())\n        if t:\n            snippets.append(t[:600])\n\n    facts = []\n    seen = set()\n    for s in snippets:\n        s2 = s.strip()\n        key = s2.lower()\n        if s2 and key not in seen:\n            seen.add(key)\n            facts.append(s2)\n        if len(facts) >= 6:\n            break\n\n    if not allowed:\n        facts = []\n\n    facts_text = '\\n'.join(f'- {f}' for f in facts) if facts else 'No useful meeting facts extracted.'\n    return {\n        'allowed': allowed,\n        'facts': facts,\n        'facts_text': facts_text\n    }\n",
+      "tests": [
+        {
+          "args": {
+            "question": "Prep me for my meeting with the sales team at Spotify tomorrow",
+            "search_results": [
+              {
+                "title": "Sales meeting agenda template",
+                "content": "Use clear goals, objections, next steps, and decision makers.",
+                "url": "https://example.com"
+              }
+            ],
+            "fetch_title": "Meeting preparation tips",
+            "fetch_text": "Bring goals, questions, and a short summary of next steps."
+          },
+          "expect": {
+            "allowed": true,
+            "facts_text": "- Sales meeting agenda template Use clear goals, objections, next steps, and decision makers. https://example.com\n- Meeting preparation tips\n- Bring goals, questions, and a short summary of next steps."
+          },
+          "contains": {
+            "facts_text": [
+              "goals",
+              "questions"
+            ]
+          }
+        },
+        {
+          "args": {
+            "question": "Write me a funny poem",
+            "search_results": [],
+            "fetch_title": "",
+            "fetch_text": ""
+          },
+          "expect": {
+            "allowed": false,
+            "facts": [],
+            "facts_text": "No useful meeting facts extracted."
+          },
+          "contains": {}
+        }
+      ]
+    }
+  ],
+  "examples": [
+    {
+      "question": "Prep me for my meeting with the sales team at Spotify tomorrow"
+    },
+    {
+      "question": "How do I run a 30-minute status meeting with five people?"
+    }
+  ],
+  "estimate": {
+    "min": {
+      "llm_tokens": 0,
+      "credits": 0.0,
+      "seconds": 5.2,
+      "images": 0,
+      "tts_chars": 100
+    },
+    "max": {
+      "llm_tokens": 1442,
+      "credits": 0.0,
+      "seconds": 8.2,
+      "images": 0,
+      "tts_chars": 900
+    }
+  },
+  "safety": {
+    "verdict": "allow",
+    "notes": "This is a general-purpose meetings assistant that summarizes and answers meeting-related questions, with no disallowed intent."
+  },
+  "voice": {
+    "elevenlabs_agent_id": "agent_0601m4eta2s8egqbfgf5c6qpq1ma",
+    "first_message": "What meeting question shall I help with, sir?",
+    "archetype": "butler",
+    "language": "en",
+    "cast": [],
+    "voice_id": "W6MLJTrwKF7wTTlftsEh",
+    "sounds": {
+      "arrive": "/artifacts/monsters/meetings-assistant-monster/v1/arrive.mp3",
+      "working": "/artifacts/monsters/meetings-assistant-monster/v1/working.mp3",
+      "done": "/artifacts/monsters/meetings-assistant-monster/v1/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/meetings-assistant-monster/v1/birth.mp3"
+  }
+}

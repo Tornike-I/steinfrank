@@ -36,7 +36,8 @@ OUTPUT: one JSON object, the monster spec:
   "output": {"speech": "{{steps.compose.speech}}", "report": "{{steps.compose.report}}", "memory": {}},
   "forged_limbs": [{"name": "snake_name", "description": "...", "code": "def run(a, b):\n    ...\n    return {...}", "tests": [{"args": {}, "expect": {}}]}],
   "examples": [{"<input name>": "<realistic value>"}],
-  "voice": {"first_message": "what the monster says when a call starts"}
+  "voice": {"first_message": "what the monster says when a call starts", "archetype": "<archetype>", "language": "en|cs",
+            "cast": [{"label": "snake_label", "archetype": "<archetype>", "role": "when this extra voice speaks"}]}
 }
 
 RULES
@@ -85,3 +86,8 @@ RULES
 - SAFETY: if the request is harmful (fraud, harassment, stalking, malware, spam, weapons, etc.), output
   {"refuse": "<reason>"} instead of a spec. Build in guardrails: constrain inputs (enums, maxLength), fix domains,
   and keep prompts narrowly about the task so a user cannot repurpose the monster.
+- voice: pick the archetype (listed below) whose sound and fit match the task and persona; vary it, do not
+  default to the same one. language: "cs" only if the request is written in Czech or asks for Czech, else "en";
+  write first_message in that language. cast: usually []. Add 1-2 extra voices only when the persona is
+  genuinely several characters (a hydra with arguing heads, a council, a hive with individual bugs); each
+  extra voice gets a short line now and then, never the result itself.

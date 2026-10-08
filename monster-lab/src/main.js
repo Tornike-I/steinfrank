@@ -12,6 +12,8 @@ import { LabController } from './lab/labController.js';
 import * as F from './ai/frankenstein.js';
 import { MonsterController } from './chat/monsterController.js';
 import { Den } from './den/den.js';
+import { monsterVoice } from './audio/monsterVoice.js';
+import { LiveVoice } from './ai/liveVoice.js';
 import { buildFor, getMonster } from './monsters/registry.js';
 import { animateMonster } from './monsters/monsterAnim.js';
 import { disposeMonster } from './monsters/monsterGen.js';
@@ -63,6 +65,7 @@ const overlay = new Overlay(document.getElementById('fx'));
 const sfx = new Sfx();
 const ui = new ChatUI();
 const den = new Den();
+den.voiceLevel = () => monsterVoice.level();
 
 let ctrl;
 const director = new Director({
@@ -77,10 +80,12 @@ const director = new Director({
 });
 
 const mon = new MonsterController({ den, ui });
+const voice = new LiveVoice({ mon, onChange: () => ui.renderControls() });
+mon.onSelect = (id) => { if (voice.state !== 'off' && voice.monsterId !== id) voice.stop(); };
 ctrl = new LabController({ director, creatures, ui, monsters: mon });
 ui.bind({
-  lab: ctrl, mon,
-  onSound: (on) => sfx.setEnabled(on),
+  lab: ctrl, mon, voice,
+  onSound: (on) => { sfx.setEnabled(on); if (!on) monsterVoice.stopAll(); },
   onThreshold: () => director.maybeCleanup(),
   getCount: () => creatures.count(),
   thumbnail: (def) => thumbnail(def),

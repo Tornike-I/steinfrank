@@ -32,7 +32,11 @@ class TtsLimb(Limb):
     description = "Text to speech (ElevenLabs). Returns {file, url} of an mp3. Billed per character."
     args_schema = {
         "type": "object",
-        "properties": {"text": {"type": "string"}, "voice_id": {"type": "string", "description": "Optional"}},
+        "properties": {
+            "text": {"type": "string"},
+            "voice_id": {"type": "string", "description": "Optional"},
+            "model_id": {"type": "string", "description": "Optional ElevenLabs model"},
+        },
         "required": ["text"],
     }
     requires = ("ELEVENLABS_API_KEY",)
@@ -51,7 +55,7 @@ class TtsLimb(Limb):
         text = str(args["text"])
         ctx.charge(Cost(tts_chars=len(text)))
         audio = await _eleven_post(
-            f"/text-to-speech/{args.get('voice_id') or config.VOICE_ID}", {"text": text, "model_id": config.TTS_MODEL}
+            f"/text-to-speech/{args.get('voice_id') or config.VOICE_ID}", {"text": text, "model_id": args.get("model_id") or config.TTS_MODEL}
         )
         path, url = artifact_path(ctx, "mp3")
         path.write_bytes(audio)

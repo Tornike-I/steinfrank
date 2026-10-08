@@ -1,0 +1,139 @@
+{
+  "cast": {
+    "frankenstein": "OJbIcvwwjlJRFlPuIlSS",
+    "igor": "ykQ4oOdhaziVAsugbPA1"
+  },
+  "archetypes": {
+    "brute": {
+      "sound": "huge swamp ogre, very deep gravelly bass, gruff but friendly",
+      "fits": "blunt checks and verdicts, anything that should feel strong and no-nonsense",
+      "voices": ["687WEDd2Nwlt0plqkwVk", "aUQ7479veThpgpsg8t1j"],
+      "stability": 0.35,
+      "speed": 1.0,
+      "tags": [
+        {"tag": "grunts", "description": "A short grunt before a verdict or when starting a task."},
+        {"tag": "growls", "description": "A low growl when something looks bad or suspicious."},
+        {"tag": "chuckles", "description": "A deep chuckle when something is good news."}
+      ],
+      "sounds": {
+        "arrive": "heavy footsteps thudding closer and a deep friendly ogre growl",
+        "working": "big creature rummaging through a pile of rocks and wood, steady rhythmic digging",
+        "done": "heavy wooden club thumping on the ground twice"
+      }
+    },
+    "gremlin": {
+      "sound": "tiny goblin, extremely high-pitched squeaky nasal voice, impish",
+      "fits": "quick lookups, prices, deals, anything playful or fast",
+      "voices": ["2alZolkAxYfd0BjrwL0u", "WBzRzkV62uoAx8YQeGyW"],
+      "stability": 0.3,
+      "speed": 1.05,
+      "tags": [
+        {"tag": "giggles", "description": "A quick giggle when starting or when the news is good."},
+        {"tag": "hisses", "description": "A short hiss when something is a bad deal or a scam."},
+        {"tag": "cackles", "description": "A mischievous cackle when revealing a finding."}
+      ],
+      "sounds": {
+        "arrive": "tiny goblin scurrying across a wooden floor and a squeaky gleeful giggle",
+        "working": "small creature rapidly scribbling and rustling papers, tiny claws tapping",
+        "done": "tiny bell jingling and a squeak"
+      }
+    },
+    "lich": {
+      "sound": "ancient undead sorcerer, dry hollow whispery voice, aristocratic",
+      "fits": "deep research, records, history, anything that should feel ancient and knowing",
+      "voices": ["ZHknkF1suova33m13JPO", "dROdNBXC7KjqIG4JG8K5"],
+      "stability": 0.4,
+      "speed": 1.1,
+      "tags": [
+        {"tag": "whispers", "description": "Whisper the first few words of a secret or warning."},
+        {"tag": "sighs", "description": "A cold sigh when the findings disappoint."}
+      ],
+      "sounds": {
+        "arrive": "stone crypt door grinding open with a cold echoing wind",
+        "working": "pages of an ancient book turning in a quiet echoing crypt, faint candle crackle",
+        "done": "a single deep chime echoing in a stone hall"
+      }
+    },
+    "golem": {
+      "sound": "massive stone golem, booming deep resonant voice, calm and simple",
+      "fits": "reading and summarizing, steady reliable reports",
+      "voices": ["elfiDKtwo000IOWXoY4K", "uDilYhhlpAMdem496v2U"],
+      "stability": 0.45,
+      "speed": 1.05,
+      "tags": [
+        {"tag": "rumbles", "description": "A low rumble before speaking a result."},
+        {"tag": "grunts", "description": "A short grunt to acknowledge a request."}
+      ],
+      "sounds": {
+        "arrive": "large stone blocks grinding and a deep rumble as a golem wakes",
+        "working": "slow heavy stone grinding and gravel shifting, steady rhythm",
+        "done": "heavy boulder dropping onto stone"
+      }
+    },
+    "hag": {
+      "sound": "old swamp witch, crackly sly elderly voice, conspiratorial",
+      "fits": "shopping and reviews, scams, gossip, anything about who to trust",
+      "voices": ["lOcBOvRcIXS7yTaPAHak", "tStMsODu3oCmdbAPfW4G"],
+      "stability": 0.3,
+      "speed": 1.0,
+      "tags": [
+        {"tag": "cackles", "description": "A witchy cackle when revealing a juicy finding."},
+        {"tag": "whispers", "description": "Whisper a warning or a secret."}
+      ],
+      "sounds": {
+        "arrive": "creaking wooden cottage door and a witch's sly cackle",
+        "working": "thick potion bubbling in an iron cauldron with a crackling fire",
+        "done": "a cork popping out of a glass bottle with a magical shimmer"
+      }
+    },
+    "igor": {
+      "sound": "hunchbacked lab assistant, eager high-pitched manic voice, Eastern European accent",
+      "fits": "creative and content work, generating things, anything experimental",
+      "voices": ["ykQ4oOdhaziVAsugbPA1", "99JZBfwHzhARORNUOSSN"],
+      "stability": 0.3,
+      "speed": 1.05,
+      "tags": [
+        {"tag": "excited", "description": "Excited delivery for the first words of a result."},
+        {"tag": "giggles", "description": "A nervous giggle when starting a task."},
+        {"tag": "gasps", "description": "A gasp before a surprising finding."}
+      ],
+      "sounds": {
+        "arrive": "electrical sparks crackling and a laboratory machine powering up",
+        "working": "busy mad science laboratory, bubbling beakers and humming electrical coils",
+        "done": "a big electrical zap followed by a triumphant ding"
+      }
+    },
+    "swarm": {
+      "sound": "insect hive creature, buzzing raspy voice with hissing sibilants, alien",
+      "fits": "monsters that check many things at once: competitors, lists, social accounts",
+      "voices": ["BFo38TGETX3ObOT3c1sr", "Guy86grW8u2sYT1zTNNT"],
+      "stability": 0.35,
+      "speed": 1.05,
+      "tags": [
+        {"tag": "clicks", "description": "Insect clicking when starting or switching topics."},
+        {"tag": "hisses", "description": "A hiss when something is a threat or a bad sign."}
+      ],
+      "sounds": {
+        "arrive": "a swarm of insects buzzing closer and clicking mandibles",
+        "working": "busy insect hive humming and buzzing, many tiny legs scurrying",
+        "done": "the buzzing swarm suddenly stopping with a single sharp click"
+      }
+    },
+    "butler": {
+      "sound": "undead zombie butler, posh British voice with a raspy decaying throat, polite",
+      "fits": "briefings, meeting prep, scheduling, anything formal or service-like",
+      "voices": ["KBsfyE80okT1f9WZIWb7", "W6MLJTrwKF7wTTlftsEh"],
+      "stability": 0.4,
+      "speed": 1.05,
+      "tags": [
+        {"tag": "clears throat", "description": "Clear the throat politely before presenting a result."},
+        {"tag": "groans", "description": "A small undead groan when starting a task."}
+      ],
+      "sounds": {
+        "arrive": "old mansion door creaking open and a polite servant bell ringing",
+        "working": "grandfather clock ticking in a quiet old mansion, quill scratching on paper",
+        "done": "a silver service bell ringing once"
+      }
+    }
+  }
+}
