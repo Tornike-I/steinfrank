@@ -112,11 +112,22 @@ Each frame:
 Chat, composer and sidebar are opaque DOM on top, so monsters can never
 cover text or catch clicks. Clicks on empty scene areas are hit-tested
 against creatures in JS (`creatures.pick`). A second canvas, `#fx`, above the
-UI draws faint lens effects (acid, flash, wash).
+UI draws the brief explosion flash.
 
-**Stop-motion rhythm:** character poses (scientist, monsters) are evaluated
-at **12 fps** with a tiny per-step jitter ("boil"). The camera, particles and
-UI run at full frame rate.
+**Motion:** character poses (scientist, monsters) are evaluated every frame
+for smooth animation; the handmade look comes from the models and materials.
+
+**Collision:** the scientist's hands are pushed out of solids (the table slab
+and the patient's torso ellipsoid). If an arm would pass through one, the IK
+tries raised elbow poles, and as a last resort lifts the hand until the whole
+arm clears it (`Scientist._keepOut` / `_armHits`; the organ pull opts out to
+reach into the wound). Floor monsters never step into the table, the machine,
+the bin, the crate or each other: they pick reachable targets, steer around
+solids and other monsters, and refuse steps that would overlap.
+
+**Attach shots:** new limbs are delivered to the ends of the slab on the
+scientist's side, and the attach camera looks down from higher up, framing the
+socket so the hands coming over the body stay in view.
 
 **Adaptive resolution** (`main.js`): if the frame rate drops below 40 (while
 focused and not throttled), the pixel ratio steps down to as low as 0.45×,

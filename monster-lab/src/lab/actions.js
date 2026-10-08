@@ -1,6 +1,6 @@
 // Scientist choreography. Each factory returns an action for Scientist.play():
 // { name, duration, loop?, blend?, pose(t, pose), events? }.
-// Pose functions are evaluated on the stop-motion clock (12 fps) and may move
+// Pose functions are evaluated every frame and may move
 // props (limbs, the patient, tools) so everything ticks in the same rhythm.
 import * as THREE from 'three';
 import { handQuat, smooth, seg } from './scientist.js';
@@ -256,7 +256,8 @@ export function makeActions(lab, sfx) {
     let attached = false;
     return {
       name: 'attach', duration: 2.9, blend: 0.3,
-      site: () => d.obj.position.clone().lerp(sock.pos, 0.5),
+      // Frame where the limb is going (the socket), with a bit of where it came from.
+      site: () => d.obj.position.clone().lerp(sock.pos, 0.7).add(V(0, 0.1, 0)),
       events: [
         { t: 0, fn: () => empty() },
         { t: 0.5, fn: () => sfx.play('squelch') },
@@ -308,7 +309,7 @@ export function makeActions(lab, sfx) {
     let ropeEnd = mid.clone();
     const fallbackRope = rubber(0xd9707a);
     return {
-      name: 'organ', duration: 2.7, blend: 0.3,
+      name: 'organ', duration: 2.7, blend: 0.3, collide: false, // hands go into the wound on purpose
       site: () => mid.clone().lerp(ropeEnd, 0.5),
       events: [
         { t: 0, fn: () => { empty(); if (w.open < 0.8) w.setOpen(1); } },

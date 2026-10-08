@@ -21,6 +21,8 @@ import { themeOf } from './monsters/themes.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const CANCEL = Symbol('cancel');
+// The operating table's slab, as a solid for the scientist's arms.
+const TABLE_BOX = { kind: 'box', min: V(SPOTS.table.x - 1.02, 0, SPOTS.table.z - 0.39), max: V(SPOTS.table.x + 1.02, SPOTS.tableTop + 0.01, SPOTS.table.z + 0.39) };
 
 const SHOTS = {
   idle: { target: V(0, 1.42, 0), dir: V(0.2, 0.05, 1), fitH: 1.35, fitW: 1.9, fov: 30 },
@@ -38,6 +40,7 @@ export class Director {
   constructor({ lab, creatures, overlay, sfx, getStageRect, getThreshold, canCleanup, onMonsterBorn, onCreaturesChanged, onCleanupStart, onCleanupDone }) {
     Object.assign(this, { lab, creatures, overlay, sfx, getStageRect, getThreshold, canCleanup, onMonsterBorn, onCreaturesChanged, onCleanupStart, onCleanupDone });
     this.sci = lab.scientist;
+    this.sci.obstacles = [TABLE_BOX];
     this.A = makeActions(lab, sfx);
     this.epoch = 0;
     this.chain = Promise.resolve();
@@ -199,6 +202,7 @@ export class Director {
     this.cleaning = false;
     this._setHurry(false);
     this.where = 'idle';
+    this.sci.obstacles = [TABLE_BOX];
     this.sci.play(this.A.idle());
     this.sci._prev = this.sci.pose; // no blend from wherever he was
     this._shot(this._idleShot(), { cut: true });
@@ -214,6 +218,8 @@ export class Director {
     const A = this.A;
     op.patient = new Patient(op.def, this.lab.scene);
     this._dropIn(op.patient);
+    // Solid things his hands and arms must not pass through.
+    this.sci.obstacles = [TABLE_BOX, { kind: 'ellipsoid', obj: op.patient.m.torso, rad: op.patient.m.torsoRadii }];
 
     // 1–2. Start working; pull back to reveal the slab.
     this._shot('wide', { speed: 2.4 });
@@ -254,6 +260,7 @@ export class Director {
     if (op.aborted) { await this._scrap(op, e); op.onAbort?.(op.failure); }
     else await this._finish(op, e);
     this.op = null;
+    this.sci.obstacles = [TABLE_BOX];
     this._setHurry(false);
     this._afterOp(e);
   }
@@ -281,6 +288,10 @@ export class Director {
   _deliverLimb(patient, name) {
     const d = patient.deliverLimb(name);
     if (!d) return Promise.resolve();
+    // Frame the landing spot and the socket it is headed for.
+    const sock = patient.socketWorld(d).pos;
+    const spot = d.obj.position.clone();
+    this._shot({ target: spot.clone().lerp(sock, 0.6).add(V(0, 0.15, 0)), dir: V(0.2, 0.75, 1), fitH: 1.35, fov: 28 }, { speed: 2.2 });
     const y = d.obj.position.y;
     d.obj.position.y += 2.2;
     this.sfx.play('whoosh');
@@ -309,8 +320,10 @@ export class Director {
   }
 
   _frameAction(kind, action) {
-    const close = { incise: 0.62, sew: 0.7, inject: 0.75, attach: 1.05, organ: 1.15 }[kind] ?? 0.85;
-    const dir = kind === 'organ' || kind === 'attach' ? V(0.35, 0.32, 1) : V(0.5, 0.26, 1);
+    const close = { incise: 0.62, sew: 0.7, inject: 0.75, attach: 1.25, organ: 1.15 }[kind] ?? 0.85;
+    // Attaching: higher, so the hands coming over the body to the socket are
+    // in view rather than hidden behind the patient.
+    const dir = kind === 'attach' ? V(0.2, 0.75, 1) : kind === 'organ' ? V(0.35, 0.32, 1) : V(0.5, 0.26, 1);
     const site = action.site;
     let smooth = site().clone();
     this._shot({
@@ -345,6 +358,7 @@ export class Director {
     this.sfx.play('squeak');
     this.reveal = null;
     const rec = { id: op.monsterId, seed: op.seed, defId: op.def.id, theme: op.def.theme, name: themeLabel(op.def), limbs: op.def.limbs || [] };
+    this.sci.obstacles = [TABLE_BOX]; // the monster is leaving the slab
     const landed = this.creatures.adopt(rec, patient);
     this.onMonsterBorn?.(rec);
     op.born = true;

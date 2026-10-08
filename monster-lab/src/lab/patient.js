@@ -108,9 +108,13 @@ export class Patient {
     stump.scale.set(1, 0.5, 1);
     parent.add(stump);
     this.scene.attach(obj);
-    const i = this.detached.length;
-    obj.position.set(SPOTS.table.x + ((i % 3) - 1) * 0.32, SPOTS.tableTop + 0.06, SPOTS.table.z + 0.3);
-    obj.quaternion.setFromUnitVectors(V(0, 1, 0), V(this.rng.float(-0.4, 0.4), 0.15, 1).normalize());
+    // Delivered to the ends of the slab on the scientist's side, clear of the
+    // body and within easy reach, rather than at the camera-side edge.
+    const i = this.detached.filter((x) => x.tool).length;
+    const side = i % 2 ? 1 : -1;
+    const x = THREE.MathUtils.clamp(SPOTS.table.x + side * (this.m.height / 2 + 0.16), SPOTS.table.x - 0.86, SPOTS.table.x + 0.86);
+    obj.position.set(x, SPOTS.tableTop + 0.05, SPOTS.table.z - 0.2 + Math.floor(i / 2) * 0.22);
+    obj.quaternion.setFromUnitVectors(V(0, 1, 0), V(-side, 0.1, this.rng.float(-0.3, 0.3)).normalize());
     const cap = mesh(new THREE.SphereGeometry(0.035, 10, 8), this.bloodMat);
     cap.scale.set(1, 0.4, 1);
     obj.add(cap);

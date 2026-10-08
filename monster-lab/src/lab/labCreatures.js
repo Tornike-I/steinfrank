@@ -9,7 +9,12 @@ import { buildFor } from '../monsters/registry.js';
 import { animateMonster, hopHeight } from '../monsters/monsterAnim.js';
 import { blood as bloodMat } from '../three/materials.js';
 
-const FPS = 12;
+// Solids monsters walk around: the operating table (with a margin for its
+// legs), the Tesla machine, the bin and the bomb crate.
+const BLOCK_RECTS = [{ x0: 0.35, x1: 2.65, z0: -0.5, z1: 0.65 }];
+const BLOCK_CIRCLES = [{ x: 2.45, z: -0.85, r: 0.45 }, { x: 0.15, z: -1.0, r: 0.4 }, { x: -1.0, z: -0.95, r: 0.4 }];
+const blocked = (x, z, pad = 0) => BLOCK_RECTS.some((r) => x > r.x0 - pad && x < r.x1 + pad && z > r.z0 - pad && z < r.z1 + pad)
+  || BLOCK_CIRCLES.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + pad);
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const ACID = new THREE.Color(0x7aff3a);
 
@@ -27,10 +32,11 @@ const blobGeo = (() => {
 })();
 
 export class LabCreatures {
-  constructor({ scene, fx, camera }) {
+  constructor({ scene, fx, camera, scientist }) {
     this.scene = scene;
     this.fx = fx;
     this.camera = camera;
+    this.scientist = scientist; // a moving obstacle too
     this.creatures = new Map();
     this.decals = [];
     this.sprites = [];
@@ -111,6 +117,70 @@ export class LabCreatures {
       c.arrive = { t: 0, from, to, dur: 0.9, resolve };
       this._place(c);
     });
+  }
+
+  _radius(c) { return Math.max(0.12, c.m.width * 0.4); }
+
+  // A wander target the monster can walk to in a straight line without
+  // crossing a solid (the steering handles the small stuff).
+  _reachableTarget(c) {
+    for (let i = 0; i < 14; i++) {
+      const t = this._freeSpot(this._randomPoint(), 0.45);
+      let clear = true;
+      for (let k = 1; k <= 12 && clear; k++) {
+        const p = c.pos.clone().lerp(t, k / 12);
+        if (blocked(p.x, p.z, this._radius(c))) clear = false;
+      }
+      if (clear) return t;
+    }
+    return c.pos.clone();
+  }
+
+  // Would this position overlap another monster more than it did before?
+  _crowded(c, before) {
+    const r = this._radius(c);
+    for (const o of this.creatures.values()) {
+      if (o === c || o.state === 'dissolving' || o.state === 'flung') continue;
+      const min = (r + this._radius(o)) * 0.95;
+      const now = Math.hypot(c.pos.x - o.pos.x, c.pos.z - o.pos.z);
+      if (now < min && now < Math.hypot(before.x - o.pos.x, before.z - o.pos.z)) return true;
+    }
+    return false;
+  }
+
+  // Push away from nearby monsters and the scientist.
+  _separation(c) {
+    const push = V();
+    const r = this._radius(c);
+    for (const o of this.creatures.values()) {
+      if (o === c || o.state === 'dissolving' || o.state === 'flung') continue;
+      const dx = c.pos.x - o.pos.x, dz = c.pos.z - o.pos.z;
+      const d = Math.hypot(dx, dz), min = r + this._radius(o) + 0.08;
+      if (d > 1e-4 && d < min) push.add(V(dx / d, 0, dz / d).multiplyScalar((min - d) / min * 2));
+    }
+    const s = this.scientist?.root.position;
+    if (s) {
+      const dx = c.pos.x - s.x, dz = c.pos.z - s.z, d = Math.hypot(dx, dz), min = r + 0.45;
+      if (d > 1e-4 && d < min) push.add(V(dx / d, 0, dz / d).multiplyScalar((min - d) / min * 3));
+    }
+    return push;
+  }
+
+  // Desired direction plus separation, deflected along solids ahead.
+  _steer(c, desired) {
+    const dir = desired.clone().add(this._separation(c).multiplyScalar(2.2));
+    const r = this._radius(c);
+    const ahead = c.pos.clone().addScaledVector(dir.clone().normalize(), r + 0.15);
+    if (blocked(ahead.x, ahead.z, r)) {
+      // Slide along the obstacle: try turning left or right, whichever is free.
+      for (const a of [0.6, -0.6, 1.2, -1.2, 1.8, -1.8]) {
+        const d2 = dir.clone().applyAxisAngle(V(0, 1, 0), a).normalize();
+        const p2 = c.pos.clone().addScaledVector(d2, r + 0.15);
+        if (!blocked(p2.x, p2.z, r)) return d2;
+      }
+      return V();
+    }
+    return dir.lengthSq() > 1e-6 ? dir.normalize() : dir;
   }
 
   _randomPoint() {
@@ -352,11 +422,8 @@ export class LabCreatures {
       }
       this._place(c);
     }
-    // Stop-motion tick for the puppets.
-    this._acc += dt;
-    if (this._acc < 1 / FPS) return;
-    const step = Math.min(this._acc, 0.25);
-    this._acc = 0;
+    // Puppets animate every frame for smooth motion.
+    const step = Math.min(dt, 0.1);
     for (const c of [...this.creatures.values()]) this._tick(c, step);
   }
 
@@ -386,16 +453,32 @@ export class LabCreatures {
         const dist = d.length();
         const speed = 0.32 * m.speed;
         const moving = m.gait !== 'hop' || Math.sin(c.phase) > 0;
-        if (dist < 0.04) { c.mode = 'idle'; c.timer = 1 + Math.random() * 3.5; }
-        else if (moving) c.pos.addScaledVector(d.normalize(), Math.min(dist, speed * dt * (m.gait === 'hop' ? 2 : 1)));
-        c.yawT = Math.atan2(c.target.x - c.pos.x, c.target.z - c.pos.z);
+        if (dist < 0.06 || c.stuck > 2.5) { c.mode = 'idle'; c.timer = 1 + Math.random() * 3.5; c.stuck = 0; }
+        else if (moving) {
+          const dir = this._steer(c, d.normalize());
+          const stepLen = Math.min(dist, speed * dt * (m.gait === 'hop' ? 2 : 1));
+          const before = c.pos.clone();
+          c.pos.addScaledVector(dir, stepLen);
+          // Never step into a solid or into another monster; if that keeps
+          // happening, give up on this target and pick another.
+          const refused = blocked(c.pos.x, c.pos.z, this._radius(c)) || this._crowded(c, before);
+          if (refused) c.pos.copy(before);
+          c.stuck = refused || dir.lengthSq() < 0.01 ? (c.stuck || 0) + dt : Math.max(0, (c.stuck || 0) - dt);
+          if (dir.lengthSq() > 0.01) c.yawT = Math.atan2(dir.x, dir.z);
+        }
         c.walk = Math.min(1, c.walk + dt * 4);
         c.phase += dt * (m.gait === 'scuttle' ? 13 : 8) * m.speed;
       } else {
         c.walk = Math.max(0, c.walk - dt * 4);
         c.timer -= dt;
+        // Idle monsters still get nudged apart if someone bumps into them.
+        const push = this._separation(c);
+        if (push.lengthSq() > 1e-5) {
+          const next = c.pos.clone().addScaledVector(push, dt * 1.6);
+          if (!blocked(next.x, next.z, this._radius(c))) c.pos.copy(next);
+        }
         if (c.timer < 0) {
-          c.target = this._freeSpot(this._randomPoint(), 0.45);
+          c.target = this._reachableTarget(c);
           c.mode = 'walk';
           c.excite = Math.random() < 0.2 ? 1 : 0;
         }

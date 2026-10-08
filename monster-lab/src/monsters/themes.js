@@ -189,7 +189,7 @@ export const THEMES = Object.fromEntries([
     },
   }),
   T('space', 'Space & Science', {
-    keywords: ['space', 'planet', 'star', 'galaxy', 'nasa', 'moon', 'mars', 'science', 'physics', 'chemistry', 'universe', 'black hole', 'atom', 'gravity', 'rocket'],
+    keywords: ['space', 'planet', 'star', 'galaxy', 'nasa', 'moon', 'mars', 'jupiter', 'saturn', 'venus', 'comet', 'asteroid', 'astronaut', 'telescope', 'science', 'physics', 'chemistry', 'universe', 'black hole', 'atom', 'gravity', 'rocket'],
     names: [['Nebula', 'Quasar', 'Orbit', 'Comet'], ['gut', 'snot', 'blob', 'oid']],
     intro: 'floats a little, then remembers gravity.',
     placeholder: 'Ask about space or science…',

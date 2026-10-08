@@ -12,7 +12,6 @@ import { disposeMonster } from '../monsters/monsterGen.js';
 import { animateMonster, VERB_FOR_KIND } from '../monsters/monsterAnim.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
-const FPS = 12;
 
 const MOODS = {
   weather: { wall: 0x4a5a6a, light: 0xcfe0ff, fill: 0x6aa0ff },
@@ -362,10 +361,8 @@ export class Den {
     }
 
     // Stop-motion stepping for the puppet.
-    this._acc += dt;
-    if (this._acc < 1 / FPS) return;
-    const step = this._acc;
-    this._acc = 0;
+    // Animate every frame for smooth motion.
+    const step = Math.min(dt, 0.1);
     const s = this.state;
     s.verbW = Math.min(1, s.verbW + step * 3.5);
     s.talk = Math.max(0, s.talk - step * 4);

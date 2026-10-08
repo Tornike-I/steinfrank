@@ -3,16 +3,15 @@
 //
 // Animation model: actions output a Pose (root transform, spine, look target,
 // world-space wrist targets + hand orientations, feet targets). Poses blend on
-// action change and are applied with 2-bone IK. The pose is only re-evaluated
-// 12 times per second, giving the character a stop-motion rhythm while the
-// camera stays perfectly smooth.
+// action change and are applied with 2-bone IK every frame. Hands are kept
+// out of solid obstacles (the table, the patient's torso) and elbows are
+// raised when an arm would pass through them.
 import * as THREE from 'three';
 import { clay, cloth, rubber, metal, glossy, glass } from '../three/materials.js';
 import { textures } from '../three/textures.js';
 import { lumpy, sausage, mesh, stitches, ellipsoidLine } from '../three/geom.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
-const FPS = 12;
 const UPPER = 0.33, FORE = 0.32, THIGH = 0.37, SHIN = 0.37;
 const HIP_Y = 0.78;
 
@@ -461,16 +460,13 @@ export class Scientist {
         if (!a.fired.has(i) && a.t >= e.t && prevT <= e.t + 1e9) { a.fired.add(i); e.fn(); }
       }
     }
-    this._stepAcc += dt;
-    if (this._stepAcc >= 1 / FPS) {
-      this._stepAcc %= 1 / FPS;
-      this._step++;
-      const t = a.loop ? a.t : Math.min(a.t, a.duration);
-      a.pose(t, this._raw);
-      const w = smooth(t / (a.blend ?? 0.3));
-      blendPose(this.pose, this._prev, this._raw, w);
-      this.apply(this.pose);
-    }
+    this._step++;
+    const t = a.loop ? a.t : Math.min(a.t, a.duration);
+    a.pose(t, this._raw);
+    const w = smooth(t / (a.blend ?? 0.3));
+    blendPose(this.pose, this._prev, this._raw, w);
+    this.collide = a.collide !== false;
+    this.apply(this.pose);
     if (!a.loop && a.t >= a.duration && a._resolve) {
       const r = a._resolve;
       a._resolve = null;
@@ -505,7 +501,7 @@ export class Scientist {
 
   // --------------------------------------------------------------- apply ----
   apply(p) {
-    const jitter = (k) => (Math.sin(this._step * 12.9898 + k * 78.233) * 43758.5453 % 1) * 0.008;
+    const jitter = () => 0;
     this.root.position.copy(p.rootPos);
     this.root.rotation.y = p.rootYaw;
     this.hips.position.set(p.hipsX, p.hipsY, 0);
@@ -532,8 +528,30 @@ export class Scientist {
     for (const k of ['R', 'L']) {
       const arm = this.arms[k];
       const h = p['h' + k];
-      const pole = this.local(p.rootPos, p.rootYaw, arm.side * 0.9, 0.9, -0.6);
-      solveTwoBone(arm.upper, arm.fore, UPPER, FORE, h.p, pole);
+      const target = h.p.clone();
+      if (this.collide) this._keepOut(target, 0.07);
+      // Default elbows hang out and back; if that arm would pass through an
+      // obstacle, lift the elbows up and out like a surgeon reaching over.
+      const poles = [
+        this.local(p.rootPos, p.rootYaw, arm.side * 0.9, 0.9, -0.6),
+        this.local(p.rootPos, p.rootYaw, arm.side * 0.8, 2.0, -0.2),
+        this.local(p.rootPos, p.rootYaw, arm.side * 1.7, 1.5, 0.1),
+      ];
+      let clear = !this.collide;
+      for (let i = 0; i < poles.length && !clear; i++) {
+        solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
+        clear = !this._armHits(arm, target);
+      }
+      if (clear) {
+        if (!this.collide) solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[0]);
+      } else {
+        // Last resort: lift the hand until the whole arm passes over the obstacle.
+        for (let i = 0; i < 8 && !clear; i++) {
+          target.y += 0.05;
+          solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[1]);
+          clear = !this._armHits(arm, target);
+        }
+      }
       setWorldQuat(arm.hand, h.q, arm.fore);
       const c = h.curl;
       arm.fingers.forEach((f, i) => { f.rotation.x = -c * (i % 2 ? 1.25 : 1.0); });
@@ -551,6 +569,51 @@ export class Scientist {
   }
 
   gripWorld(key) { return this.arms[key].grip.getWorldPosition(V()); }
+
+  // ------------------------------------------------------------ collision
+  // obstacles: [{ kind: 'box', min, max }] and
+  //            [{ kind: 'ellipsoid', obj (Object3D), rad (local radii) }]
+  _inside(p, margin) {
+    for (const o of this.obstacles || []) {
+      if (o.kind === 'box') {
+        if (p.x > o.min.x - margin && p.x < o.max.x + margin && p.z > o.min.z - margin && p.z < o.max.z + margin && p.y < o.max.y + margin && p.y > o.min.y) return o;
+      } else if (o.kind === 'ellipsoid') {
+        const l = o.obj.worldToLocal(p.clone());
+        const k = o.obj.getWorldScale(V()).x || 1;
+        const m = margin / k;
+        if ((l.x / (o.rad.x + m)) ** 2 + (l.y / (o.rad.y + m)) ** 2 + (l.z / (o.rad.z + m)) ** 2 < 1) return o;
+      }
+    }
+    return null;
+  }
+
+  // Push a hand target out of any obstacle it is inside.
+  _keepOut(p, margin) {
+    for (let iter = 0; iter < 3; iter++) {
+      const o = this._inside(p, margin);
+      if (!o) return;
+      if (o.kind === 'box') { p.y = o.max.y + margin; continue; }
+      const l = o.obj.worldToLocal(p.clone());
+      const k = o.obj.getWorldScale(V()).x || 1;
+      const m = margin / k;
+      const r = V(o.rad.x + m, o.rad.y + m, o.rad.z + m);
+      const n = V(l.x / r.x, l.y / r.y, l.z / r.z);
+      const len = n.length() || 1;
+      n.multiplyScalar(1.02 / len);
+      p.copy(o.obj.localToWorld(V(n.x * r.x, n.y * r.y, n.z * r.z)));
+    }
+  }
+
+  // Does the upper arm or forearm pass through an obstacle?
+  _armHits(arm, wrist) {
+    const s = arm.upper.getWorldPosition(V());
+    const e = arm.fore.getWorldPosition(V());
+    for (let i = 1; i <= 5; i++) {
+      if (this._inside(s.clone().lerp(e, i / 5), 0.03)) return true;
+      if (i < 5 && this._inside(e.clone().lerp(wrist, i / 5), 0.03)) return true;
+    }
+    return false;
+  }
 }
 
 // ------------------------------------------------------------------ IK ----
