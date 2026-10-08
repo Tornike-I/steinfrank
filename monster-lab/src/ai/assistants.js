@@ -5,19 +5,125 @@
 // A provider returns an async iterable of workflow events:
 //   { type: 'step', step } | { type: 'stepDone', step } | { type: 'token', text }
 // and must honour `signal` (throw AbortError) and throw on failure.
+// Extra interactive events (Frankenstein provider):
+//   { type: 'question', text, reply(text) }        the run needs input
+//   { type: 'confirm', text, credits, decide(bool) } a paid step needs approval
+//   { type: 'speech', text, audio }                  the short spoken verdict
 import { runWorkflow } from '../workflows/engine.js';
 import { scoreTopics, themeOf } from '../monsters/themes.js';
+import { limbInfo } from '../monsters/limbParts.js';
+import * as F from './frankenstein.js';
 
 const PROVIDERS = {
   // Simulated: themed steps + scripted answer.
   scripted: (assistant, input, opts) => runWorkflow(assistant, input, opts),
-  // Example for later:
-  // http: async function* (assistant, input, { signal, history }) {
-  //   const res = await fetch(assistant.provider.endpoint, { method: 'POST', signal,
-  //     body: JSON.stringify({ model: assistant.provider.model, system: assistant.instructions, messages: history }) });
-  //   ...yield { type: 'token', text } per chunk
-  // },
+  // The real thing: a published Frankenstein monster run.
+  frankenstein: frankensteinRun,
 };
+
+// Workflow step kinds (what the monster acts out) for each limb.
+const KIND_FOR_VERB = { look: 'gather', read: 'read', think: 'think', compute: 'compute', write: 'write', speak: 'write' };
+export const kindForLimb = (limb) => KIND_FOR_VERB[limbInfo(limb).verb] || 'think';
+
+const human = (id) => id.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+
+function leavesOf(spec) {
+  const out = [];
+  spec.steps.forEach((s, top) => {
+    for (const leaf of s.parallel || [s]) out.push({ id: leaf.id, limb: leaf.limb, note: leaf.note || '', top });
+  });
+  return out;
+}
+
+// Turn a free-text question into the monster's inputs.
+export function mapInputs(schema, text) {
+  const t = text.trim();
+  if (t.startsWith('{')) { try { return JSON.parse(t); } catch { /* not JSON */ } }
+  const props = schema?.properties || {};
+  if (props.question) return { question: t };
+  const out = {};
+  const strings = Object.entries(props).filter(([, p]) => p.type === 'string' && !p.enum);
+  for (const [k, p] of Object.entries(props)) if (p.default !== undefined) out[k] = p.default;
+  const required = schema?.required || [];
+  const target = strings.find(([k]) => required.includes(k)) || strings[0];
+  if (target) out[target[0]] = t;
+  return out;
+}
+
+const specCache = new Map();
+
+async function* frankensteinRun(assistant, input, { signal }) {
+  const id = assistant.provider.monsterId;
+  if (!specCache.has(id)) specCache.set(id, await F.getMonster(id));
+  const spec = specCache.get(id);
+  const leaves = leavesOf(spec);
+  const run = await F.startRun(id, mapInputs(spec.inputs, input));
+
+  // Funnel SSE updates into this generator.
+  const queue = [];
+  let wake = null, failure = null;
+  const push = (x) => { queue.push(x); wake?.(); };
+  const close = F.watchRun(run.id, push, (err) => { failure = err; wake?.(); });
+  const onAbort = () => { failure = Object.assign(new Error('Aborted'), { name: 'AbortError' }); close(); wake?.(); };
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  const started = new Set(), finished = new Set();
+  const asked = new Set();
+  const stepOf = (leaf, i) => ({ id: leaf.id, label: leaf.note || human(leaf.id), kind: kindForLimb(leaf.limb), limb: leaf.limb, index: i, total: leaves.length });
+  try {
+    push(run);
+    for (;;) {
+      while (!queue.length && !failure) await new Promise((r) => { wake = r; });
+      wake = null;
+      if (failure) throw failure;
+      const r = queue.shift();
+      // Finished leaves, from the run log.
+      for (const ev of r.log || []) {
+        if (!ev.step || finished.has(ev.step) || !['done', 'skipped', 'declined', 'error'].includes(ev.event)) continue;
+        const i = leaves.findIndex((l) => l.id === ev.step);
+        if (i < 0) continue;
+        if (!started.has(ev.step)) { started.add(ev.step); yield { type: 'step', step: stepOf(leaves[i], i) }; }
+        finished.add(ev.step);
+        yield { type: 'stepDone', step: stepOf(leaves[i], i), outcome: ev.event };
+      }
+      // Running: the unfinished leaves of the first unfinished top-level step.
+      if (['queued', 'running', 'waiting', 'needs_input', 'needs_confirmation'].includes(r.status)) {
+        const next = leaves.find((l) => !finished.has(l.id));
+        if (next) {
+          for (const [i, l] of leaves.entries()) {
+            if (l.top === next.top && !finished.has(l.id) && !started.has(l.id)) {
+              started.add(l.id);
+              yield { type: 'step', step: stepOf(l, i) };
+            }
+          }
+        }
+      }
+      if (r.status === 'needs_input' && r.needs_input && !asked.has('q:' + r.needs_input.message)) {
+        asked.add('q:' + r.needs_input.message);
+        yield { type: 'question', text: r.needs_input.message, reply: (text) => F.answer(r.id, text) };
+      }
+      if (r.status === 'needs_confirmation' && r.confirm && !asked.has('c:' + r.confirm.message)) {
+        asked.add('c:' + r.confirm.message);
+        yield { type: 'confirm', text: r.confirm.message, credits: r.confirm.credits, decide: (ok) => F.confirm(r.id, ok) };
+      }
+      if (r.status === 'failed' || r.status === 'blocked') throw new Error(r.error || `run ${r.status}`);
+      if (r.status === 'completed') {
+        const out = r.output || {};
+        if (out.speech) yield { type: 'speech', text: out.speech, audio: F.artifactUrl(out.speech_audio_url) };
+        const report = String(out.report || out.speech || '(no report)');
+        for (const w of report.match(/\s*\S+\s*/g) || []) {
+          if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+          await new Promise((res) => setTimeout(res, 12));
+          yield { type: 'token', text: w };
+        }
+        return;
+      }
+    }
+  } finally {
+    close();
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
 
 // Questions that clearly belong to another topic get redirected, keeping each
 // assistant within its subject.
@@ -44,7 +150,9 @@ async function* redirect(assistant, other, { signal }) {
 }
 
 export function respond(assistant, input, opts) {
-  const other = offTopic(assistant, input);
+  // Scripted monsters need this guard; forged ones were told to stay on topic.
+  const scripted = (assistant.provider?.kind || 'scripted') === 'scripted';
+  const other = scripted && !input.trim().startsWith('{') ? offTopic(assistant, input) : null;
   if (other) return redirect(assistant, other, opts);
   const run = PROVIDERS[assistant.provider?.kind] || PROVIDERS.scripted;
   return run(assistant, input, opts);

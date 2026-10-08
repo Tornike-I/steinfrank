@@ -5,6 +5,8 @@ import { state, save } from '../core/store.js';
 import { renderMarkdown } from './markdown.js';
 import { allMonsters } from '../monsters/registry.js';
 import { themeOf } from '../monsters/themes.js';
+import { limbLabel } from '../monsters/limbParts.js';
+import { backend } from '../ai/frankenstein.js';
 
 const GREETINGS = ['Greetings, you absolute specimen.', 'Greetings, you absolute specimen.', 'Ask me anything. I have spare parts.', 'Lie down. Tell me everything.'];
 
@@ -35,7 +37,7 @@ export class ChatUI {
       form: $('#composer'), input: $('#prompt'), send: $('#send'), greeting: $('#greeting'), ideas: $('#ideas'), banner: $('#topic-banner'),
       toggleSide: $('#toggle-sidebar'), toggleSide2: $('#toggle-sidebar-2'),
       sound: $('#sound'), settings: $('#settings'), pop: $('#settings-pop'), threshold: $('#threshold'),
-      thresholdVal: $('#threshold-val'), count: $('#specimen-count'), model: $('#model'), disclaimer: $('#disclaimer'),
+      thresholdVal: $('#threshold-val'), count: $('#specimen-count'), model: $('#model'), disclaimer: $('#disclaimer'), backend: $('#backend-chip'),
     };
     this.nodes = new Map();
     this._raf = new Map();
@@ -144,7 +146,9 @@ export class ChatUI {
       const th = def ? themeOf(def.theme) : null;
       e.greeting.textContent = def ? `${def.name} ${th.intro}` : '';
       e.input.placeholder = th?.placeholder || '';
-      e.disclaimer.textContent = def ? `${def.name} · ${th.label} assistant · simulated responses` : '';
+      const real = def?.provider?.kind === 'frankenstein';
+      const limbs = def?.limbs?.length ? ` · limbs: ${[...new Set(def.limbs.map(limbLabel))].join(', ')}` : '';
+      e.disclaimer.textContent = def ? `${def.name} · ${th.label} · ${real ? `Frankenstein monster “${def.provider.monsterId}”` : 'simulated responses'}${limbs}` : '';
     }
     this.renderIdeas();
     this.renderSidebar();
@@ -261,8 +265,24 @@ export class ChatUI {
     const running = m.status === 'streaming' || m.status === 'pending';
     row.classList.toggle('streaming', running);
     if (m.steps) this._fillSteps(m, row.querySelector('.steps'));
-    if (!m.content && running) body.innerHTML = '';
-    else body.innerHTML = renderMarkdown(m.content || '') + (m.status === 'streaming' && m.content ? '<span class="caret"></span>' : '');
+    let html = '';
+    if (m.question) {
+      html += `<div class="ask"><b>${esc(this.mon.def?.name || 'The monster')} asks:</b> ${esc(m.question.text)}`
+        + (m.question.answer ? `<div class="ask-answer">You: ${esc(m.question.answer)}</div>` : '<div class="ask-hint">Type your answer below.</div>')
+        + (m.question.error ? `<div class="note error">${esc(m.question.error)}</div>` : '') + '</div>';
+    }
+    if (m.confirm) {
+      const c = m.confirm;
+      html += `<div class="confirm-card" data-state="${c.state}"><div>${esc(c.text)}</div>`
+        + (c.state === 'pending'
+          ? `<div class="confirm-actions"><button type="button" class="meet" data-approve="1">Approve ${esc(c.credits)} credits</button><button type="button" class="ghost" data-approve="0">Decline</button></div>`
+          : `<div class="note">${c.state === 'approved' ? 'Approved.' : c.state === 'declined' ? 'Declined — it will do without.' : 'No longer waiting.'}</div>`)
+        + (c.error ? `<div class="note error">${esc(c.error)}</div>` : '') + '</div>';
+    }
+    if (m.speech) html += `<div class="speech">“${esc(m.speech)}”</div>`;
+    if (m.content || !running) html += renderMarkdown(m.content || '') + (m.status === 'streaming' && m.content ? '<span class="caret"></span>' : '');
+    body.innerHTML = html;
+    body.querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', () => this.mon.decide(m.id, b.dataset.approve === '1')));
     const foot = row.querySelector('.msg-foot');
     foot.innerHTML = '';
     if (m.status === 'stopped') foot.insertAdjacentHTML('beforeend', '<span class="note">Stopped.</span>');
@@ -345,12 +365,17 @@ export class ChatUI {
     b.title = gen ? 'Stop' : 'Send';
     b.setAttribute('aria-label', b.title);
     b.disabled = !gen && !this.el.input.value.trim();
+    if (state.mode === 'monsters' && this.mon?.awaitingAnswer) this.el.input.placeholder = `Answer ${this.mon.def.name}'s question…`;
+    else if (state.mode === 'monsters' && this.mon?.def) this.el.input.placeholder = themeOf(this.mon.def.theme).placeholder;
     this._refreshActions();
     this.renderSidebarBusy();
   }
 
   renderHeader() {
     const e = this.el;
+    e.backend.dataset.on = backend.connected ? '1' : '0';
+    e.backend.textContent = !backend.checked ? 'Frankenstein…' : backend.connected ? 'Frankenstein' : 'Offline · scripted';
+    e.backend.title = backend.connected ? 'Connected to the Frankenstein API: new monsters are forged for real' : 'Frankenstein API not reachable: new monsters use scripted workflows';
     const on = state.settings.sound;
     e.sound.classList.toggle('on', on);
     e.sound.title = on ? 'Mute sound' : 'Enable sound';

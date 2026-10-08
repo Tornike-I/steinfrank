@@ -120,7 +120,10 @@ def _run(run_id: str) -> dict:
 
 @app.post("/forge")
 async def forge(body: ForgeBody):
-    return (await pipeline.forge(body.description)).as_dict()
+    try:
+        return (await pipeline.forge(body.description)).as_dict()
+    except RuntimeError as e:  # e.g. "forging needs OPENAI_API_KEY": tell the UI why
+        raise HTTPException(503, str(e))
 
 
 @app.get("/drafts/{monster_id}")

@@ -294,6 +294,7 @@ export class Den {
 
   // --------------------------------------------------- workflow lifecycle
   onStep(step) {
+    if (step.limb && this.m) this.m.activeLimbs.add(step.limb);
     const verb = VERB_FOR_KIND[step.kind] || 'think';
     this.perform(verb);
     this.state.intensity = 1;
@@ -301,17 +302,27 @@ export class Den {
     this._shot(verb === 'think' || verb === 'look' ? 'think' : 'work');
     if (verb === 'compute' && this.m) this.fx.sparks(this._headTop(), 10, 0xaaff7a);
   }
+  onStepDone(step) {
+    if (step.limb && this.m) this.m.activeLimbs.delete(step.limb);
+  }
+  onQuestion(text) {
+    this.perform('think');
+    this.showBubble(text.length > 70 ? text.slice(0, 67) + '…' : text, 'waiting for your answer');
+    this._shot('think');
+  }
   onToken() {
     if (this.state.verb !== 'speak') { this.perform('speak'); this.hideBubble(); this._shot('speak'); }
     this.state.talk = 1;
   }
   onDone() {
+    this.m?.activeLimbs.clear();
     this.state.intensity = 0;
     this.hideBubble();
     this.perform('cheer', 1.8);
     this._shot('idle');
   }
   onFail(stopped) {
+    this.m?.activeLimbs.clear();
     this.state.intensity = 0;
     this.hideBubble();
     this.perform('sad', stopped ? 1.4 : 2.6);

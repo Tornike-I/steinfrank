@@ -1,13 +1,15 @@
-// The Director turns response lifecycle events into choreography.
+// The Director turns lifecycle events into choreography.
 //
-//   begin()    – generation started: walk to the slab, start cutting
-//   complete() – generation finished: finish the current action, zap, reveal
-//   abort()    – stopped / failed: finish quickly, scrap the body into the bin
+//   create(def, limbs) – build a topic monster: the surgery keeps going until
+//                        Frankenstein has designed it (`limbs` resolves with
+//                        the spec's limb names), each limb is then delivered
+//                        and sewn on, lightning, and the monster leaps off the
+//                        slab onto the lab floor.
+//   summon(def)        – an existing monster charges the camera and screams.
+//   abortCreate()      – the unfinished body is scrapped into the bin.
+//   maybeCleanup()     – overcrowding: bomb, acid, hose (counterparts only).
 //
-// The operation loop keeps choosing surgical actions for as long as the
-// response is streaming, so animation length follows generation time rather
-// than a fixed cinematic. All sequences run on one serial chain; reset()
-// cancels everything (used when switching conversations).
+// All sequences run on one serial chain; reset() cancels everything.
 import * as THREE from 'three';
 import { Patient } from './lab/patient.js';
 import { makeActions } from './lab/actions.js';
@@ -25,7 +27,9 @@ const SHOTS = {
   wide: { target: V(1.0, 1.15, 0.0), dir: V(0.12, 0.22, 1), fitH: 1.9, fitW: 3.4, fov: 32 },
   zap: { target: V(1.85, 1.4, -0.3), dir: V(-0.25, 0.15, 1), fitH: 1.6, fitW: 2.6, fov: 30 },
   reveal: { target: V(1.5, 1.4, 0.1), dir: V(0, 0.08, 1), fitH: 1.55, fitW: 2.0, fov: 30 },
-  cleanup: { target: V(0.3, 1.15, 0.1), dir: V(0.05, 0.12, 1), fitH: 1.9, fitW: 3.2, fov: 32 },
+  // Pulled back so the floor in front of the scientist (where monsters roam) is in view.
+  floor: { target: V(0.55, 0.85, 0.75), dir: V(0.08, 0.34, 1), fitH: 2.5, fitW: 5.6, fov: 32 },
+  cleanup: { target: V(0.55, 0.8, 0.9), dir: V(0.05, 0.4, 1), fitH: 2.7, fitW: 6.0, fov: 32 },
 };
 
 export class Director {
@@ -96,15 +100,25 @@ export class Director {
   // Build a topic assistant's monster as a short, fixed cinematic (it no
   // longer tracks answer generation). Resolves once the monster has landed in
   // the lab; rejects if cancelled (the body is scrapped into the bin).
-  create(def) {
+  create(def, limbs = Promise.resolve(def.limbs || [])) {
     return new Promise((resolve, reject) => {
       const op = this.begin({ messageId: `create-${def.id}`, def });
-      op.done = true;
       op.minActions = 2;
+      op.limbQueue = [];
+      op.waitingLimbs = true;
       op.monsterId = `w-${def.id}-${Date.now().toString(36)}`;
       op.onBorn = resolve;
-      op.onAbort = () => reject(new Error('cancelled'));
+      op.onAbort = (err) => reject(err || new Error('cancelled'));
       this._createOp = op;
+      Promise.resolve(limbs).then((names) => {
+        op.limbQueue.push(...(names || []));
+        op.def = { ...op.def, limbs: names || [] };
+        op.waitingLimbs = false;
+        op.done = true;
+      }, (err) => {
+        op.failure = err;
+        this.abort({ messageId: op.messageId });
+      });
     });
   }
 
@@ -119,9 +133,10 @@ export class Director {
     const sci = this.sci;
     if (this.where === 'idle' && !this.op) {
       sci.play(this.A.celebrate(2.6, SPOTS.idle));
+      this._shot('floor', { speed: 2.4 });
     }
     await this.creatures.summon(
-      { seed: def.seed, theme: def.theme, defId: def.id, name: themeLabel(def) },
+      { seed: def.seed, theme: def.theme, defId: def.id, name: themeLabel(def), limbs: def.limbs || [] },
       {
         onScream: () => {
           this.sfx.play('scream');
@@ -179,14 +194,14 @@ export class Director {
     this.where = 'idle';
     this.sci.play(this.A.idle());
     this.sci._prev = this.sci.pose; // no blend from wherever he was
-    this._shot('idle', { cut: true });
+    this._shot(this._idleShot(), { cut: true });
     if (wasCleaning) this.onCleanupDone?.({ cancelled: true });
   }
 
   // ------------------------------------------------------------- surgery
   async _operate(op, e) {
     this._pending = null;
-    if (op.aborted) { this._setHurry(false); op.onAbort?.(); return; } // stopped before we even started
+    if (op.aborted) { this._setHurry(false); op.onAbort?.(op.failure); return; } // stopped before we even started
     this.op = op;
     this._setHurry(false);
     const A = this.A;
@@ -203,14 +218,20 @@ export class Director {
     }
     this.where = 'work';
 
-    // 3–4. Operate for as long as the response streams.
+    // 3–4. Operate until Frankenstein has designed the monster; then each of
+    // its limbs is delivered and sewn on.
     let last = null;
     let first = true;
     let count = 0;
     for (;;) {
       if (op.aborted) break;
-      if (op.done && !first && count >= (op.minActions || 1)) break;
-      const kind = first ? 'incise' : op.minActions ? (op.patient.nextDetached() ? 'attach' : 'sew') : this._nextAction(op.patient, last);
+      let kind;
+      if (!first && op.limbQueue?.length) {
+        await this._w(this._deliverLimb(op.patient, op.limbQueue.shift()), e);
+        if (op.aborted) break;
+        kind = 'attach';
+      } else if (op.done && !first && count >= (op.minActions || 1) && !op.patient.nextDetached()) break;
+      else kind = first ? 'incise' : this._nextAction(op.patient, last);
       count++;
       const action = A[kind](op.patient);
       this._frameAction(kind, action);
@@ -219,7 +240,7 @@ export class Director {
       first = false;
     }
 
-    if (op.aborted) { await this._scrap(op, e); op.onAbort?.(); }
+    if (op.aborted) { await this._scrap(op, e); op.onAbort?.(op.failure); }
     else await this._finish(op, e);
     this.op = null;
     this._setHurry(false);
@@ -244,6 +265,22 @@ export class Director {
       }
     });
   }
+
+  // A limb drops from the rafters onto the slab's front edge.
+  _deliverLimb(patient, name) {
+    const d = patient.deliverLimb(name);
+    if (!d) return Promise.resolve();
+    const y = d.obj.position.y;
+    d.obj.position.y += 2.2;
+    this.sfx.play('whoosh');
+    return this._tween(0.5, (u) => {
+      const f = Math.min(1, (u / 0.8) ** 2);
+      d.obj.position.y = y + 2.2 * (1 - f) + (u > 0.8 ? Math.sin(((u - 0.8) / 0.2) * Math.PI) * 0.04 : 0);
+      if (u >= 0.8 && !d._landed) { d._landed = true; this.sfx.play('splat'); this.lab.fx.blood(d.obj.position.clone(), V(0, 1, 0), 8); }
+    });
+  }
+
+  _idleShot() { return this.creatures.count() > 0 ? 'floor' : 'idle'; }
 
   _nextAction(patient, last) {
     const opts = [];
@@ -292,42 +329,17 @@ export class Director {
     }), e);
     await this._sleep(this.hurry ? 0.15 : 0.8, e);
 
-    // Leap off the table toward the camera, then hand off to the 2D layer.
-    const cam = this.lab.camera;
-    const start = patient.holder.position.clone();
-    const fwd = V(0, 0, -1).applyQuaternion(cam.quaternion);
-    const end = cam.position.clone().addScaledVector(fwd, 1.2).add(V(0.3, -0.9, 0));
+    // Leap off the slab onto the lab floor and join the others.
+    this._shot('floor', { speed: 2.0 });
     this.sfx.play('squeak');
-    await this._w(this._tween(this.hurry ? 0.25 : 0.5, (u) => {
-      patient.holder.position.lerpVectors(start, end, u).add(V(0, Math.sin(u * Math.PI) * 0.5, 0));
-      patient.holder.rotation.x = u * 0.4;
-    }), e);
-    this._handoff(op, patient);
     this.reveal = null;
-
-    await this._walkHome(e);
-  }
-
-  _handoff(op, patient) {
-    const rect = this.getStageRect();
-    const cam = this.lab.camera;
-    const m = patient.m;
-    m.root.updateMatrixWorld(true);
-    const feet = m.root.getWorldPosition(V());
-    const top = feet.clone().add(V(0, m.height, 0));
-    const toScreen = (p) => {
-      const n = p.clone().project(cam);
-      return { x: rect.x + (n.x * 0.5 + 0.5) * rect.w, y: rect.y + (-n.y * 0.5 + 0.5) * rect.h };
-    };
-    const a = toScreen(feet), b = toScreen(top);
-    const spx = THREE.MathUtils.clamp(Math.abs(a.y - b.y) / m.height, 40, 500);
-    patient.dispose();
-    const id = op.monsterId;
-    const rec = { id, seed: op.seed, defId: op.def.id, theme: op.def.theme, name: themeLabel(op.def) };
-    this.creatures.spawnFromStage({ ...rec, sx: a.x, sy: Math.min(a.y, rect.y + rect.h + 40), spx });
+    const rec = { id: op.monsterId, seed: op.seed, defId: op.def.id, theme: op.def.theme, name: themeLabel(op.def), limbs: op.def.limbs || [] };
+    const landed = this.creatures.adopt(rec, patient);
     this.onMonsterBorn?.(rec);
     op.born = true;
-    if (op.onBorn) setTimeout(op.onBorn, 1300);
+    await this._w(landed, e);
+    if (op.onBorn) setTimeout(op.onBorn, 900);
+    await this._walkHome(e);
   }
 
   async _scrap(op, e) {
@@ -338,13 +350,13 @@ export class Director {
   }
 
   async _walkHome(e) {
-    this._shot('wide', { speed: 2.2 });
+    if (!this.creatures.count()) this._shot('wide', { speed: 2.2 });
     if (this._pending && !this._pending.aborted) return; // next operation is waiting
     await this._play(this.A.walk(this.sci.pose.rootPos.clone(), SPOTS.idle, 0), e);
     this.where = 'idle';
     this.lab.fx.clearSplats();
     this.lab.clearTossed();
-    this._shot('idle', { speed: 1.8 });
+    this._shot(this._idleShot(), { speed: 1.8 });
     this.sci.play(this.A.idle());
   }
 
@@ -377,12 +389,13 @@ export class Director {
     await this._play(A.throwThing(P.bomb, {
       onRelease: (prop) => {
         this._thrown.push(prop);
-        this._throwAtCamera(prop, 0.6, () => {
+        const at = this._crowdCentre();
+        this._throwTo(prop, at, 0.8, () => {
           prop.parent?.remove(prop);
-          this.overlay.flash('255,230,170', 0.55);
+          this.overlay.flash('255,230,170', 0.4);
           lab.rig.shake = 1;
           this.sfx.play('boom');
-          landed(this.creatures.explodeAll());
+          landed(this.creatures.explodeAt(at));
         });
       },
     }), e);
@@ -398,9 +411,10 @@ export class Director {
       release: 1.5, dur: 2.0, sound: 'whoosh',
       onRelease: (prop) => {
         this._thrown.push(prop);
-        this._throwAtCamera(prop, 0.5, () => {
+        const at = this._crowdCentre();
+        this._throwTo(prop, at, 0.7, () => {
           prop.parent?.remove(prop);
-          this.overlay.splat(this.getStageRect(), '120,255,60', 9);
+          this.lab.fx.goo(at.clone().setY(0.1), 40, 2.5);
           this.sfx.play('splat');
           this.sfx.play('sizzle');
           splashed(this.creatures.dissolveAll());
@@ -415,7 +429,8 @@ export class Director {
     const hose = (this._hoseAction = A.hose());
     this.sci.play(hose);
     await this._sleep(0.5, e);
-    await this._w(this.overlay.wash(2.0, (y) => this.creatures.washTo(y)), e);
+    const H = window.innerHeight;
+    await this._w(this.overlay.wash(2.0, (y) => this.creatures.wash(y / H)), e);
     hose.stop();
     this._hoseAction = null;
 
@@ -429,17 +444,23 @@ export class Director {
     if (this._pending && !this._pending.aborted) return;
     await this._play(A.walk(A.AT, SPOTS.idle, 0), e);
     this.where = 'idle';
-    this._shot('idle', { speed: 1.8 });
+    this._shot(this._idleShot(), { speed: 1.8 });
     this.sci.play(A.idle());
   }
 
-  _throwAtCamera(prop, dur, onArrive) {
-    const cam = this.lab.camera;
+  // Where to aim the bomb / acid: the middle of the crowd on the floor.
+  _crowdCentre() {
+    const list = [...this.creatures.creatures.values()];
+    if (!list.length) return V(0.8, 0, 1.4);
+    const c = list.reduce((a, x) => a.add(x.pos), V()).multiplyScalar(1 / list.length);
+    return c.setY(0);
+  }
+
+  _throwTo(prop, to, dur, onArrive) {
     const from = prop.position.clone();
-    const fwd = V(0, 0, -1).applyQuaternion(cam.quaternion);
-    const to = cam.position.clone().addScaledVector(fwd, 0.25);
+    const arc = 1.0 + from.distanceTo(to) * 0.25;
     this._tween(dur, (u) => {
-      prop.position.lerpVectors(from, to, u * u).add(V(0, Math.sin(u * Math.PI) * 0.35, 0));
+      prop.position.lerpVectors(from, to, u).add(V(0, Math.sin(u * Math.PI) * arc, 0));
       prop.rotation.x += 0.3; prop.rotation.z += 0.2;
       if (prop.userData.spark) prop.userData.spark.scale.setScalar(0.6 + Math.random());
     }).then(onArrive);

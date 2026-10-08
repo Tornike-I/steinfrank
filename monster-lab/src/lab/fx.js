@@ -97,6 +97,22 @@ export class LabFx {
     }
   }
 
+  // Explosion fireball puffs.
+  fire(pos, n = 40) {
+    const cols = [0xfff1a0, 0xffb030, 0xff6a1a, 0xff3a10];
+    for (let i = 0; i < n; i++) {
+      const v = V(Math.random() - 0.5, Math.random() * 0.9 + 0.3, Math.random() - 0.5).normalize().multiplyScalar(1.5 + Math.random() * 3);
+      this.glow.add({ p: pos.clone(), v, life: 0.5 + Math.random() * 0.4, max: 0.9, size: 0.04 + Math.random() * 0.08, color: cols[i % 4], g: -1, drag: 2.5, grow: 2.5, fade: true });
+    }
+  }
+  // Acid droplets / goo.
+  goo(pos, n = 20, spread = 1.5) {
+    for (let i = 0; i < n; i++) {
+      const v = V((Math.random() - 0.5) * spread, Math.random() * 2.5 + 0.5, (Math.random() - 0.5) * spread);
+      this.glow.add({ p: pos.clone(), v, life: 1.2, max: 1.2, size: 0.012 + Math.random() * 0.02, color: 0x9aff4a, g: 9, drag: 0.3, stretch: true, fade: true });
+    }
+  }
+
   addSplat(pos, size, color = 0x5a0204) {
     const i = this._splat++ % this.splatMesh.instanceMatrix.count;
     _q.setFromAxisAngle(V(1, 0, 0), -Math.PI / 2);

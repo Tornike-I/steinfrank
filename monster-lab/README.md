@@ -256,7 +256,15 @@ by a refresh become `stopped`. Switching tabs never clears anything.
 - The browser throttles `requestAnimationFrame` to about 5/s when the window
   is unfocused. Cinematics slow down accordingly. That's expected, not a bug.
 
-## 7. Known limitations
+## 7. Frankenstein integration, floor monsters and limbs
+
+- **Backend:** run `python -m uvicorn frankenstein.api:app` from `frankenstein/` (port 8000). The Vite dev server proxies `/frank/*` to it (`FRANK_URL` overrides the target). The header chip shows *Frankenstein* when the API is reachable and *Offline · scripted* otherwise. Force offline with `?offline=1` or `localStorage["stitchwick-lab.offline"]="1"`.
+- **Creation (real mode):** a new-topic Lab question → `POST /forge` with a brief asking for a single `question` input. The surgery keeps going until the forge returns. Then `publish` runs (voice only with `VITE_FRANK_VOICE=1`), each limb in the spec is delivered onto the slab and sewn on, there's lightning, and the monster leaps onto the floor. Forge errors (refused, invalid, or missing `OPENAI_API_KEY`) scrap the body and show the reason in the banner.
+- **Answers (real mode):** `POST /monsters/{id}/runs` + SSE `/runs/{id}/events`. The UI infers running steps from the spec order and the run log. `needs_input` becomes a question callout answered from the composer, and `needs_confirmation` becomes an Approve/Decline card (credits are never spent without a click). `output.speech` is quoted (audio plays only if sound is on) and `output.report` streams as the answer. There's no cancel endpoint, so Stop only stops following the run. A JSON object typed into a monster tab is passed as raw inputs.
+- **Limbs → body parts** (`src/monsters/limbParts.js`): web_search = telescope eye, http_fetch = grabber claw, llm = brain jar, forged:* = carved wooden limb, sokosumi = hired tentacle with a price tag, tts = gramophone horn, sfx = squeezebox, image = camera eye, notify = alarm bell. The matching part animates while its step runs. Scripted monsters get limbs implied by their workflow's step kinds.
+- **Floor:** wandering counterparts are 3D actors on the lab floor (`src/lab/labCreatures.js`), with blob shadows, name-tag sprites and raycast clicking. The camera's resting shot pulls back to show the floor whenever monsters exist. Bomb and acid land in the crowd, and the hose washes stains from the back of the room forward.
+
+## 8. Known limitations
 
 - Answers are simulated. Workflow outputs are invented, except that Math
   really does the arithmetic. Each simulated answer says so.

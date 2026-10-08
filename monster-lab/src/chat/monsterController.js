@@ -13,6 +13,8 @@ export class MonsterController {
     this.den = den;
     this.ui = ui;
     this.gens = new Map(); // assistant id → { msgId, ctrl }
+    this.waiting = new Map(); // assistant id → { msg, reply } while a run asks a question
+    this.decisions = new Map(); // message id → decide(approve) for paid-step confirmations
   }
 
   get def() {
@@ -24,7 +26,9 @@ export class MonsterController {
     d.chat ||= [];
     return { id: d.id, messages: d.chat };
   }
-  get generating() { return !!this.def && this.gens.has(this.def.id); }
+  // While a run waits for the user's answer, the composer sends that answer.
+  get generating() { return !!this.def && this.gens.has(this.def.id) && !this.waiting.has(this.def.id); }
+  get awaitingAnswer() { return !!this.def && this.waiting.has(this.def.id); }
 
   select(id) {
     state.selectedMonster = id;
@@ -43,6 +47,16 @@ export class MonsterController {
     text = text.trim();
     const def = this.def;
     if (!text || !def || this.generating) return false;
+    const w = this.waiting.get(def.id);
+    if (w) {
+      this.waiting.delete(def.id);
+      w.msg.question.answer = text;
+      w.reply(text).catch((err) => { w.msg.question.error = err.message; this.ui.updateMessage(w.msg); });
+      save();
+      this.ui.updateMessage(w.msg);
+      this.ui.renderControls();
+      return true;
+    }
     def.chat ||= [];
     def.chat.push({ id: uid('u'), role: 'user', content: text });
     const msg = { id: uid('a'), role: 'assistant', content: '', status: 'pending', steps: [] };
@@ -76,11 +90,23 @@ export class MonsterController {
     try {
       for await (const ev of respond(def, input, { signal: ctrl.signal, history })) {
         if (ev.type === 'step') {
-          msg.steps.push({ id: ev.step.id, label: ev.step.label, kind: ev.step.kind, state: 'running' });
+          msg.steps.push({ id: ev.step.id, label: ev.step.label, kind: ev.step.kind, limb: ev.step.limb, state: 'running' });
           if (live()) this.den.onStep(ev.step);
         } else if (ev.type === 'stepDone') {
           const s = msg.steps.find((x) => x.id === ev.step.id);
-          if (s) s.state = 'done';
+          if (s) s.state = ev.outcome && ev.outcome !== 'done' ? ev.outcome : 'done';
+          if (live()) this.den.onStepDone(ev.step);
+        } else if (ev.type === 'question') {
+          msg.question = { text: ev.text, answer: null };
+          this.waiting.set(def.id, { msg, reply: ev.reply });
+          if (live()) this.den.onQuestion(ev.text);
+          this.ui.renderControls();
+        } else if (ev.type === 'confirm') {
+          msg.confirm = { text: ev.text, credits: ev.credits, state: 'pending' };
+          this.decisions.set(msg.id, ev.decide);
+        } else if (ev.type === 'speech') {
+          msg.speech = ev.text;
+          if (ev.audio && state.settings.sound) new Audio(ev.audio).play().catch(() => {});
         } else if (ev.type === 'token') {
           msg.content += ev.text;
           if (live()) this.den.onToken();
@@ -97,11 +123,32 @@ export class MonsterController {
       if (live()) this.den.onFail(stopped);
     } finally {
       if (this.gens.get(def.id)?.msgId === msg.id) this.gens.delete(def.id);
+      if (this.waiting.get(def.id)?.msg === msg) this.waiting.delete(def.id);
+      this.decisions.delete(msg.id);
+      if (msg.confirm?.state === 'pending') msg.confirm.state = 'expired';
       save();
       this.ui.updateMessage(msg);
       this.ui.renderControls();
     }
   }
 
-  stop() { if (this.def) this.gens.get(this.def.id)?.ctrl.abort(); }
+  // Approve or decline a paid (credit-spending) step. Only ever from a click.
+  decide(msgId, approve) {
+    const fn = this.decisions.get(msgId);
+    const msg = this.def?.chat.find((m) => m.id === msgId);
+    if (!fn || !msg?.confirm) return;
+    this.decisions.delete(msgId);
+    msg.confirm.state = approve ? 'approved' : 'declined';
+    fn(approve).catch((err) => { msg.confirm.error = err.message; this.ui.updateMessage(msg); });
+    save();
+    this.ui.updateMessage(msg);
+  }
+
+  // Stops following the run here. (Frankenstein has no cancel endpoint, so a
+  // backend run keeps going server-side and its result is simply not shown.)
+  stop() {
+    if (!this.def) return;
+    this.waiting.delete(this.def.id);
+    this.gens.get(this.def.id)?.ctrl.abort();
+  }
 }

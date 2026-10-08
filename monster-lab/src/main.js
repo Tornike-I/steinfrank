@@ -1,14 +1,15 @@
-// Bootstrap: one WebGL canvas behind the UI renders two scenes each frame —
-// the lab (scissored into the #stage rect, with its own moving camera) and
-// the full-viewport creature layer. The DOM chat sits on top, untouched by
-// any camera motion.
+// Bootstrap: one WebGL canvas behind the UI renders the active 3D scene —
+// the lab (scientist, slab and the monsters roaming its floor) or a monster's
+// den — scissored into the #stage rect. The DOM sits on top, untouched by any
+// camera motion; creatures never block text or clicks.
 import * as THREE from 'three';
 import { Lab } from './lab/labScene.js';
-import { CreatureLayer } from './creatures/creatureLayer.js';
+import { LabCreatures } from './lab/labCreatures.js';
 import { Overlay } from './fx/overlay.js';
 import { Sfx } from './audio/sfx.js';
 import { Director } from './director.js';
 import { LabController } from './lab/labController.js';
+import * as F from './ai/frankenstein.js';
 import { MonsterController } from './chat/monsterController.js';
 import { Den } from './den/den.js';
 import { buildFor, getMonster } from './monsters/registry.js';
@@ -40,14 +41,6 @@ const stageRect = () => {
   return { x: r.left, y: r.top, w: r.width, h: r.height };
 };
 
-// Where creatures may roam: the lower part of the laboratory scene (its
-// floor). The prompt card sits on top; creatures simply pass behind it.
-function zones() {
-  const m = mainEl.getBoundingClientRect();
-  const y0 = m.top + m.height * 0.5, y1 = window.innerHeight - 24;
-  return { all: { x0: m.left + 30, x1: m.right - 30, y0, y1 }, margins: [] };
-}
-
 // Film grain for the stage glass.
 (function grain() {
   const c = document.createElement('canvas');
@@ -64,7 +57,7 @@ function zones() {
 })();
 
 const lab = new Lab();
-const creatures = new CreatureLayer({ getZones: zones });
+const creatures = new LabCreatures({ scene: lab.scene, fx: lab.fx, camera: lab.camera });
 const overlay = new Overlay(document.getElementById('fx'));
 const sfx = new Sfx();
 const ui = new ChatUI();
@@ -137,7 +130,6 @@ function thumbnail(def) {
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
-  creatures.resize(w, h);
   overlay.resize(w, h, window.devicePixelRatio);
 }
 window.addEventListener('resize', resize);
@@ -146,6 +138,7 @@ resize();
 if (state.mode === 'monsters') den.setMonster(mon.def);
 ctrl.init();
 ui.renderAll();
+F.watchHealth(() => ui.renderHeader());
 director.greet();
 
 // --- clicking wandering monsters (Lab tab) --------------------------------
@@ -154,12 +147,12 @@ director.greet();
 const threadEl = document.getElementById('thread');
 const overMargin = (ev) => state.mode === 'lab' && !!ev.target.closest && !ev.target.closest('button, input, textarea, a, #composer, #sidebar, #topbar, .popover, .idea, #topic-banner');
 document.addEventListener('pointermove', (ev) => {
-  const hit = overMargin(ev) && creatures.pick(ev.clientX, ev.clientY);
+  const hit = overMargin(ev) && creatures.pick(ev.clientX, ev.clientY, stageRect());
   mainEl.classList.toggle('over-monster', !!hit);
 });
 document.addEventListener('click', (ev) => {
   if (!overMargin(ev)) return;
-  const c = creatures.pick(ev.clientX, ev.clientY);
+  const c = creatures.pick(ev.clientX, ev.clientY, stageRect());
   if (c && getMonster(c.defId) && !ctrl.busy) {
     sfx.play('squeak');
     ui.openMonster(c.defId);
@@ -167,7 +160,7 @@ document.addEventListener('click', (ev) => {
 });
 
 // Debug handle for poking at things from the console.
-window.lab = { lab, creatures, director, ctrl, mon, den, overlay, renderer, debugStage: (on = true) => document.body.classList.toggle('debug-stage', on) };
+window.lab = { lab, creatures, director, ctrl, mon, den, overlay, renderer, ui, debugStage: (on = true) => document.body.classList.toggle('debug-stage', on) };
 if (new URLSearchParams(location.search).get('debug') === 'stage') window.lab.debugStage(true);
 
 const timer = new THREE.Timer();
@@ -237,12 +230,6 @@ function step(now) {
     renderer.setScissor(r.x, y, r.w, r.h);
     if (inLab) renderer.render(lab.scene, lab.camera);
     else renderer.render(den.scene, den.camera);
-  }
-  if (inLab) {
-    renderer.setViewport(0, 0, W, H);
-    renderer.setScissor(0, 0, W, H);
-    renderer.clearDepth();
-    renderer.render(creatures.scene, creatures.camera);
   }
 }
 requestAnimationFrame(frame);

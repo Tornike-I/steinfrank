@@ -351,9 +351,10 @@ export class Lab {
     key.shadow.normalBias = 0.02;
     s.add(key, key.target);
     // Warm practical near the idle spot.
-    const fill = (this.fill = new THREE.SpotLight(0xffc890, 14, 7, 0.7, 0.6, 1.5));
-    fill.position.set(0.9, 2.4, 1.6);
-    fill.target.position.set(0, 1.2, 0);
+    // Warm fill over the scientist's spot and the floor where monsters roam.
+    const fill = (this.fill = new THREE.SpotLight(0xffc890, 26, 9, 0.85, 0.7, 1.4));
+    fill.position.set(0.6, 3.3, 3.2);
+    fill.target.position.set(0.4, 0.4, 0.7);
     fill.castShadow = true;
     fill.shadow.mapSize.set(1024, 1024);
     fill.shadow.bias = -0.0008;

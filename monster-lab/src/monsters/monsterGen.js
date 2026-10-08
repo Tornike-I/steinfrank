@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { Rng } from '../core/rng.js';
 import { clay, glossy, metal, blood, glass, thread } from '../three/materials.js';
 import { lumpy, sausage, mesh, stitches, ringSamples, ellipsoidLine } from '../three/geom.js';
+import { enableLimbs } from './limbParts.js';
 
 const SKINS = [
   0x8fae5e, 0xb48aa8, 0xd8a48c, 0x86a0b6, 0xc8b464, 0xb05e50, 0x6f9488,
@@ -600,8 +601,12 @@ export function buildMonster(seed, spec = {}) {
     personality: r.float(0, 1),
     anchors, updaters: [], theme: spec.id || null,
   };
-  if (spec.decorate) {
-    spec.decorate({ m: monster, r, anchors, M });
+  if (spec.decorate) spec.decorate({ m: monster, r, anchors, M });
+  // Frankenstein limbs (tools) as sewn-on body parts; they animate while active.
+  monster.limbParts = [];
+  monster.activeLimbs = new Set();
+  if (spec.limbs?.length) enableLimbs(monster, spec.limbs, M);
+  if (spec.decorate || spec.limbs?.length) {
     root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     root.updateMatrixWorld(true);
   }

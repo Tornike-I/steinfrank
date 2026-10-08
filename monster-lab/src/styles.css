@@ -336,3 +336,20 @@ body.debug-stage #topbar, body.debug-stage #sidebar, body.debug-stage #thread, b
 #app[data-mode="monsters"] #main.is-empty #stage { height: clamp(300px, 56vh, 600px); }
 #app.lab-busy[data-mode="lab"] #greeting, #app.lab-busy[data-mode="lab"] .ideas { opacity: 0; pointer-events: none; }
 #app[data-mode="lab"] #greeting, #app[data-mode="lab"] .ideas { transition: opacity 0.3s; }
+
+/* Frankenstein integration */
+.backend-chip { font-weight: 600; }
+.backend-chip::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #8a8274; }
+.backend-chip[data-on="1"]::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.speech { border-left: 3px solid var(--accent); padding: 6px 14px; margin: 0 0 14px; color: #f3ead6; font-style: italic; background: #211f1b; border-radius: 0 10px 10px 0; }
+.ask { border: 1px solid #5a4a2a; background: #2a2418; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 14.5px; }
+.ask b { color: #f0c860; }
+.ask-answer { margin-top: 6px; color: #d8d1c2; }
+.ask-hint { margin-top: 6px; color: var(--muted); font-size: 13px; font-style: italic; }
+.confirm-card { border: 1px solid #6a3a2a; background: #2a1c18; border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font-size: 14.5px; }
+.confirm-actions { display: flex; gap: 8px; margin-top: 10px; }
+.ghost { border: 1px solid #5a5244; background: transparent; color: var(--text); font: 600 13px var(--sans); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.ghost:hover { border-color: var(--text); }
+.steps li.skipped, .steps li.declined { color: #8a8274; }
+.steps li.skipped .tick, .steps li.declined .tick { border-color: #6a6254; background: transparent; }
+.steps li.error { color: #ff8a7a; }

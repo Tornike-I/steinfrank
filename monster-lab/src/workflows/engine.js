@@ -10,6 +10,7 @@
 // respond() to use. Events yielded:
 //   { type: 'step', step }   { type: 'stepDone', step }   { type: 'token', text }
 import { WORKFLOWS } from './workflows.js';
+import { LIMB_FOR_KIND } from '../monsters/limbParts.js';
 
 const sleep = (ms, signal) =>
   new Promise((resolve, reject) => {
@@ -30,7 +31,7 @@ export async function* runWorkflow(def, input, { signal } = {}) {
   if (/\bfail\b/i.test(input)) ctx.fail = true;
   const steps = wf.steps(ctx);
   for (let i = 0; i < steps.length; i++) {
-    const step = { ...steps[i], index: i, total: steps.length };
+    const step = { ...steps[i], index: i, total: steps.length, limb: steps[i].limb || LIMB_FOR_KIND[steps[i].kind] };
     yield { type: 'step', step };
     const [a, b] = step.duration || [900, 1600];
     if (step.run) await step.run(ctx, signal);

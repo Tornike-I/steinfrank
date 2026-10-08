@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { setPallor, disposeMonster } from '../monsters/monsterGen.js';
 import { buildFor } from '../monsters/registry.js';
+import { enableLimbs } from '../monsters/limbParts.js';
 import { clay, blood } from '../three/materials.js';
 import { lumpy, mesh, stitches, sausage } from '../three/geom.js';
 import { SPOTS } from './constants.js';
@@ -15,13 +16,14 @@ const Q_LYING = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2
 
 export class Patient {
   // def: a monster definition ({ seed, theme, ... }) so the body on the slab
-  // is the very monster that will climb off it.
+  // is the very monster that will climb off it. Tool limbs are not built in:
+  // Frankenstein delivers them mid-surgery (see deliverLimb).
   constructor(def, scene) {
     const seed = def.seed;
     this.seed = seed;
     this.scene = scene;
     this.rng = new Rng(seed ^ 0x5bd1e995);
-    this.m = buildFor(def);
+    this.m = buildFor({ ...def, limbs: [] });
     this.holder = new THREE.Group();
     this.holder.add(this.m.root);
     scene.add(this.holder);
@@ -88,6 +90,43 @@ export class Patient {
   }
 
   nextDetached() { return this.detached.find((d) => !d.attached) || null; }
+
+  // A Frankenstein limb (tool) arrives: mount it at its socket, then take it
+  // off again and lay it on the slab's front edge so the scientist can sew it
+  // on. Returns the detached entry (its obj starts above the table for the drop).
+  deliverLimb(name) {
+    const m = this.m;
+    const M = (color, o) => { const mat = clay(color, o); m.mats.push(mat); return mat; };
+    const [part] = enableLimbs(m, [name], M);
+    if (!part) return null;
+    this.holder.updateMatrixWorld(true);
+    const obj = part.mount;
+    const parent = obj.parent;
+    const rest = { pos: obj.position.clone(), quat: obj.quaternion.clone(), scale: obj.scale.clone() };
+    const stump = mesh(new THREE.SphereGeometry(0.045, 10, 8), this.bloodMat);
+    stump.position.copy(rest.pos);
+    stump.scale.set(1, 0.5, 1);
+    parent.add(stump);
+    this.scene.attach(obj);
+    const i = this.detached.length;
+    obj.position.set(SPOTS.table.x + ((i % 3) - 1) * 0.32, SPOTS.tableTop + 0.06, SPOTS.table.z + 0.3);
+    obj.quaternion.setFromUnitVectors(V(0, 1, 0), V(this.rng.float(-0.4, 0.4), 0.15, 1).normalize());
+    const cap = mesh(new THREE.SphereGeometry(0.035, 10, 8), this.bloodMat);
+    cap.scale.set(1, 0.4, 1);
+    obj.add(cap);
+    const d = { obj, parent, rest, stump, cap, part, attached: false, tool: name };
+    this.detached.push(d);
+    return d;
+  }
+
+  // Hand the finished monster over (it walks off the slab with its wounds).
+  release() {
+    this.scene.remove(this.holder);
+    for (const d of this.detached) if (!d.attached) this.scene.remove(d.obj);
+    this.holder.remove(this.m.root);
+    this.released = true;
+    return this.m;
+  }
 
   socketWorld(d) {
     const m = new THREE.Matrix4().compose(d.rest.pos, d.rest.quat, d.rest.scale);
@@ -168,6 +207,7 @@ export class Patient {
   anyWound() { return this.wounds[this.wounds.length - 1] || null; }
 
   dispose() {
+    if (this.released) return;
     this.scene.remove(this.holder);
     for (const d of this.detached) if (!d.attached) this.scene.remove(d.obj);
     disposeMonster(this.m);
