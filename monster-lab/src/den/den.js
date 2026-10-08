@@ -42,12 +42,14 @@ export class Den {
     this.m = null;
   }
 
+  // Lit like the laboratory: a warm hanging lamp overhead, a warm fill from
+  // the front, a cool rim from behind and a green glow from the jars.
   _lights() {
     const s = this.scene;
-    s.add(new THREE.HemisphereLight(0x9aa8b8, 0x2a2014, 1.1));
-    this.key = new THREE.SpotLight(0xffe2b0, 40, 9, 0.7, 0.5, 1.5);
-    this.key.position.set(0.8, 3.0, 1.8);
-    this.key.target.position.set(0, 0.5, 0);
+    s.add(new THREE.HemisphereLight(0x8090a0, 0x1a140c, 0.6));
+    this.key = new THREE.SpotLight(0xffe2b0, 32, 8, 0.75, 0.55, 1.6);
+    this.key.position.set(0.1, 2.45, 0.35);
+    this.key.target.position.set(0, 0.6, 0);
     this.key.castShadow = true;
     this.key.shadow.mapSize.set(1024, 1024);
     this.key.shadow.bias = -0.0008;
@@ -55,8 +57,12 @@ export class Den {
     this.rim = new THREE.DirectionalLight(0x7aa8ff, 1.4);
     this.rim.position.set(-2, 2.5, -2.5);
     s.add(this.rim);
-    this.fill = new THREE.PointLight(0x9aff6a, 2.2, 4, 2);
-    this.fill.position.set(-1.2, 1.4, 0.8);
+    this.front = new THREE.SpotLight(0xffc890, 18, 9, 0.8, 0.7, 1.4);
+    this.front.position.set(0.5, 3.0, 3.4);
+    this.front.target.position.set(0, 0.8, 0);
+    s.add(this.front, this.front.target);
+    this.fill = new THREE.PointLight(0x8aff5a, 2.5, 3.5, 2);
+    this.fill.position.set(-1.3, 1.8, -0.9);
     s.add(this.fill);
   }
 
@@ -68,14 +74,50 @@ export class Den {
     const floor = mesh(new THREE.PlaneGeometry(10, 8), new THREE.MeshStandardMaterial({ map: t.floor, roughness: 0.75, bumpMap: t.clay, bumpScale: 1 }), { cast: false });
     floor.rotation.x = -Math.PI / 2;
     this.room.add(floor);
-    const wallMat = new THREE.MeshStandardMaterial({ map: t.wall, color: mood.wall, roughness: 0.95, bumpMap: t.clay, bumpScale: 3 });
-    const wall = mesh(new THREE.PlaneGeometry(10, 5), wallMat, { cast: false });
+    // The same grimy plaster, tile wainscot and pipes as the laboratory.
+    const wallMat = new THREE.MeshStandardMaterial({ map: t.wall, roughness: 0.95, bumpMap: t.clay, bumpScale: 3 });
+    const wallG = new THREE.PlaneGeometry(10, 5, 50, 25);
+    const wp = wallG.attributes.position;
+    for (let i = 0; i < wp.count; i++) wp.setZ(i, Math.sin(wp.getX(i) * 2.1) * Math.cos(wp.getY(i) * 1.7) * 0.03);
+    wallG.computeVertexNormals();
+    const wall = mesh(wallG, wallMat, { cast: false });
     wall.position.set(0, 2.5, -1.4);
     this.room.add(wall);
+    for (const sx of [-1, 1]) {
+      const side = mesh(new THREE.PlaneGeometry(6, 5), wallMat, { cast: false });
+      side.rotation.y = -sx * Math.PI / 2;
+      side.position.set(sx * 3.2, 2.5, 1.3);
+      this.room.add(side);
+    }
+    const wains = mesh(new THREE.BoxGeometry(10, 1.0, 0.06), new THREE.MeshStandardMaterial({ map: t.floor, roughness: 0.5 }), { cast: false });
+    wains.position.set(0, 0.5, -1.37);
+    this.room.add(wains);
+    const pipeMat = metal(0x7a6a58);
+    for (let i = 0; i < 3; i++) {
+      const pipe = mesh(new THREE.CylinderGeometry(0.035 + i * 0.01, 0.035 + i * 0.01, 10, 10), pipeMat);
+      pipe.rotation.z = Math.PI / 2;
+      pipe.position.set(0, 2.95 + i * 0.14, -1.28 + i * 0.03);
+      this.room.add(pipe);
+    }
+    // The hanging surgical lamp, as in the lab, right above the monster.
+    const lamp = new THREE.Group();
+    lamp.position.set(0.1, 3.2, 0.35);
+    const cord = mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.6, 4), rubber(0x111111));
+    cord.position.y = -0.3;
+    lamp.add(cord);
+    const shade = mesh(new THREE.ConeGeometry(0.3, 0.28, 20, 1, true), metal(0x4a5a4a, { rough: 0.5 }));
+    shade.material.side = THREE.DoubleSide;
+    shade.position.y = -0.72;
+    lamp.add(shade);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff1c0 }));
+    bulb.position.y = -0.79;
+    lamp.add(bulb);
+    this.room.add(lamp);
+    this.lampG = lamp;
     const rug = mesh(lumpy(new THREE.CylinderGeometry(0.75, 0.78, 0.03, 28), 0.01, 3, 2), clay(0x6a2a2a, { rough: 1, bump: 3 }), { cast: false });
     rug.position.y = 0.015;
     this.room.add(rug);
-    this.key.color.set(mood.light);
+    // Each topic tints only the jar glow; the lamp stays the lab's warm light.
     this.fill.color.set(mood.fill);
     const wood = new THREE.MeshStandardMaterial({ map: t.wood, roughness: 0.85 });
 
@@ -265,10 +307,12 @@ export class Den {
   _shot(kind, cut = false) {
     const h = this.h || 1;
     const shots = {
-      idle: { target: V(0.3 * h, h * 0.68, 0), dir: V(0.18, 0.12, 1), fitH: h * 2.0, fov: 30 },
-      think: { target: V(0.55 * h, h * 0.85, 0), dir: V(0.25, 0.05, 1), fitH: h * 1.5, fitW: h * 3.0, fov: 30 },
-      work: { target: V(0.4 * h, h * 0.65, 0.1), dir: V(-0.25, 0.25, 1), fitH: h * 1.25, fitW: h * 2.8, fov: 30 },
-      speak: { target: V(0, h * 0.7, 0), dir: V(0.08, 0.06, 1), fitH: h * 1.5, fov: 30 },
+      // Waist-up, facing the viewer. The projection is offset (see main.js) so
+      // the monster sits in the upper part of the screen above the chat panel.
+      idle: { target: V(0.05 * h, h * 0.76, 0), dir: V(0.1, 0.07, 1), fitH: h * 1.8, fov: 30 },
+      think: { target: V(0.18 * h, h * 0.8, 0), dir: V(0.2, 0.06, 1), fitH: h * 1.75, fov: 30 },
+      work: { target: V(0.05 * h, h * 0.74, 0.05), dir: V(-0.15, 0.12, 1), fitH: h * 1.65, fov: 30 },
+      speak: { target: V(0, h * 0.77, 0), dir: V(0.05, 0.06, 1), fitH: h * 1.7, fov: 30 },
     };
     this.rig.set(shots[kind], { speed: 1.8, cut });
   }
@@ -351,11 +395,19 @@ export class Den {
       const top = this._headTop();
       const h = this.h;
       const bob = Math.sin(this.t * 2) * 0.02 * h;
-      // Beside the head rather than above it, so short stages don't clip it.
-      this.bubble.position.set(top.x + h * 0.95, top.y + h * 0.05 + bob, top.z + 0.1);
-      this.bubble.scale.set(h * 1.15, h * 0.54, 1);
-      this.puffs[0].position.set(top.x + h * 0.2, top.y - h * 0.02, top.z + 0.1);
-      this.puffs[1].position.set(top.x + h * 0.33, top.y + h * 0.02 + bob * 0.5, top.z + 0.1);
+      // Beside the head, sized for the waist-up framing, and kept on screen.
+      this.bubble.position.set(top.x + h * 0.62, top.y + h * 0.12 + bob, top.z + 0.1);
+      this.bubble.scale.set(h * 0.82, h * 0.385, 1);
+      this.camera.updateMatrixWorld();
+      for (let i = 0; i < 6; i++) {
+        const right = this.bubble.position.clone().add(V(h * 0.41, 0, 0)).project(this.camera);
+        const upper = this.bubble.position.clone().add(V(0, h * 0.19, 0)).project(this.camera);
+        if (right.x > 0.96) this.bubble.position.x -= h * 0.12;
+        if (upper.y > 0.92) this.bubble.position.y -= h * 0.06;
+        if (right.x <= 0.96 && upper.y <= 0.92) break;
+      }
+      this.puffs[0].position.set(top.x + h * 0.16, top.y + h * 0.02, top.z + 0.1);
+      this.puffs[1].position.set(top.x + h * 0.26, top.y + h * 0.07 + bob * 0.5, top.z + 0.1);
       this.puffs[0].scale.setScalar(h);
       this.puffs[1].scale.setScalar(h);
     }

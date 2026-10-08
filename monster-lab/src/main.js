@@ -225,6 +225,9 @@ function step(now) {
   overlay.update(dt);
   if (!inLab) {
     den.camera.aspect = aspect;
+    // Shift the picture up so the monster's head and shoulders sit above the
+    // floating chat panel, which covers its lower body.
+    den.camera.setViewOffset(r.w, r.h, 0, r.h * 0.2, r.w, r.h);
     den.update(dt);
     den.rig.update(dt);
   }

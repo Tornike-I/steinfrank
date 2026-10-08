@@ -54,7 +54,8 @@ npm run build      # static bundle in dist/
 The sidebar is the tab list: a permanent **Laboratory** tab, then one
 persistent tab per assistant (portrait, topic label, monster name, and a
 spinner while it's answering). Each tab has:
-- A large animated version of the monster in its themed **den**.
+- The monster's **room fills the whole main area** (lab-style plaster, tiles, pipes, hanging lamp and lighting, plus topic props), framed from the waist up in the upper part of the screen, with its idle and answering animations always visible.
+- A **floating chat window** in front of it (rounded, shadowed, readable) starting around the monster's waist and covering its lower body, holding the message history (scrolling inside the panel) and the prompt.
 - A chat with streaming answers and its own history. A collapsible
   **workflow checklist** ("thinking" box) shows each step live.
 - A prompt bar for follow-up questions. These never trigger surgery.
