@@ -319,7 +319,7 @@ export class LabCreatures {
     for (const d of this.decals) {
       if (d.s < 1) d.s = Math.min(1, d.s + dt * 0.6);
       if (d.fade) d.mesh.material.opacity -= dt * 2;
-      d.mesh.scale.set(d.r * d.s * d.sx, 1, d.r * d.s);
+      d.mesh.scale.set(d.r * d.s * d.sx, 1, d.r * d.s * (d.streak || 1));
     }
     this.decals = this.decals.filter((d) => {
       if (d.mesh.material.opacity > 0) return true;

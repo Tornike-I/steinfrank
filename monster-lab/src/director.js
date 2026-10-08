@@ -189,6 +189,9 @@ export class Director {
     this._thrown = [];
     this.lab.clearTossed();
     this.lab.fx.clearSplats();
+    this.lab.water.stop();
+    this.lab.water.active = false;
+    this.lab.water.film.visible = false;
     this.lab.zapLight.intensity = 0;
     this.lab.lever.rotation.x = -0.6;
     this.lab.binLid.rotation.x = -1.2;
@@ -433,11 +436,16 @@ export class Director {
     const melt = await this._w(acidArrived, e);
     await this._w(melt, e);
 
-    // 4. Hose down the floor, back of the room to the front.
-    const hose = (this._hoseAction = A.hose({ duration: 3.4, onSpray: (p) => this.creatures.washAt(p, 0.55) }));
+    // 4. Hose down the floor, back of the room to the front; the water runs
+    // toward the viewer and carries the mess off the bottom of the screen.
+    lab.water.start(this.creatures);
+    const hose = (this._hoseAction = A.hose({ duration: 3.6 }));
     this.sci.play(hose);
-    await this._sleep(3.6, e);
+    await this._sleep(3.8, e);
     hose.stop();
+    lab.water.stop();
+    this.sci.play(A.celebrate(1.2, A.AT));
+    await this._sleep(1.6, e);
     this._hoseAction = null;
 
     // 5. Clear and return to idle.

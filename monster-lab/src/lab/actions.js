@@ -643,8 +643,7 @@ export function makeActions(lab, sfx) {
         p.brow = 0.6;
         p.hipsY -= 0.04;
         const tipW = sci.arms.R.grip.localToWorld(nz.userData.tip.clone());
-        lab.fx.jet(tipW, aim, 18);
-        lab.fx.washSplats(aim, 0.6);
+        lab.water.setJet(tipW, aim);
         onSpray?.(aim);
         if (line) { lab.scene.remove(line); line.geometry.dispose(); }
         const reel = lab.reel.getWorldPosition(V());

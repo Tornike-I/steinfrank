@@ -9,6 +9,8 @@ import { lumpy, sausage, mesh, noise3 } from '../three/geom.js';
 import { Scientist } from './scientist.js';
 import { LabFx } from './fx.js';
 import { SPOTS } from './constants.js';
+import { Water } from './water.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 
@@ -30,7 +32,16 @@ export class Lab {
     this.scientist = new Scientist();
     this.scene.add(this.scientist.root);
     this.fx = new LabFx(this.scene);
+    this.water = new Water(this);
     this.tossed = [];
+  }
+
+  // Reflections for wet surfaces (only the water uses it).
+  initEnv(renderer) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.water.setEnv(env);
+    pmrem.dispose();
   }
 
   // Ballistic prop (thrown organs etc.) that lands on the floor and lingers.
@@ -395,6 +406,7 @@ export class Lab {
     this.machineBulb.material.emissiveIntensity = 0.4 + (Math.sin(t * 5) > 0 ? 0.5 : 0);
     this.scientist.update(dt);
     this.fx.update(dt);
+    this.water.update(dt);
     this.tossed = this.tossed.filter((p) => {
       p.life -= dt;
       if (!p.landed) {

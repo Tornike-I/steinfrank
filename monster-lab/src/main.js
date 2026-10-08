@@ -57,6 +57,7 @@ const stageRect = () => {
 })();
 
 const lab = new Lab();
+lab.initEnv(renderer);
 const creatures = new LabCreatures({ scene: lab.scene, fx: lab.fx, camera: lab.camera });
 const overlay = new Overlay(document.getElementById('fx'));
 const sfx = new Sfx();
