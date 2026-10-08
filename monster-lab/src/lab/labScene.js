@@ -326,17 +326,21 @@ export class Lab {
     s.add(mach);
     this.coilTop = new THREE.Vector3(2.45, 2.05, -0.85);
 
-    // Hose reel on the wall.
-    const reel = new THREE.Group();
-    reel.position.set(-0.85, 1.05, -1.36);
-    const drum = mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 18), metal(0xa83a2a, { rough: 0.5 }));
-    drum.rotation.x = Math.PI / 2;
-    reel.add(drum);
-    const coils = mesh(new THREE.TorusGeometry(0.17, 0.035, 8, 22), rubber(0x2f5a2a));
-    coils.position.z = 0.04;
-    reel.add(coils);
-    s.add(reel);
-    this.reel = reel;
+    // A coiled hose lying on the floor behind the scientist's spot. He picks
+    // the nozzle up from here for the cleanup and drops it back afterwards.
+    const coil = (this.hoseCoil = new THREE.Group());
+    coil.position.set(-0.4, 0, -0.6);
+    const hoseRubber = rubber(0x2f5a2a);
+    for (let i = 0; i < 4; i++) {
+      const loop = mesh(new THREE.TorusGeometry(0.2 - i * 0.012, 0.028, 8, 26), hoseRubber);
+      loop.rotation.x = Math.PI / 2;
+      loop.position.set(Math.sin(i * 1.7) * 0.02, 0.03 + i * 0.045, Math.cos(i * 1.3) * 0.02);
+      coil.add(loop);
+    }
+    s.add(coil);
+    // Where the loose end leaves the coil, and where the nozzle rests.
+    this.hoseExit = new THREE.Vector3(-0.22, 0.17, -0.48);
+    this.hoseRest = { pos: new THREE.Vector3(-0.1, 0.05, -0.3), quat: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0.6)) };
 
     // Bomb crate near the wall.
     const crate = mesh(lumpy(new THREE.BoxGeometry(0.45, 0.35, 0.35, 4, 4, 4), 0.012, 4, 9), new THREE.MeshStandardMaterial({ map: t.wood, roughness: 0.9 }));

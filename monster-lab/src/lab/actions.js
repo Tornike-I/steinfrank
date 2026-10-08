@@ -612,19 +612,59 @@ export function makeActions(lab, sfx) {
     },
   });
 
-  // Hose down the lab floor: the aim sweeps the floor from the back of the
-  // room toward the front in zigzags; onSpray(point) reports where water lands.
-  const hose = ({ duration = 3.2, onSpray } = {}) => {
+  // The nozzle rests on the coiled hose behind him when not in use.
+  const restNozzle = () => {
+    const nz = tools.nozzle;
+    nz.parent?.remove(nz);
+    lab.scene.add(nz);
+    nz.position.copy(lab.hoseRest.pos);
+    nz.quaternion.copy(lab.hoseRest.quat);
+  };
+  restNozzle();
+
+  // Hose down the lab floor: turn round, pick the nozzle up off the coil, turn
+  // back and sweep the jet side to side across the floor in front of him.
+  const PICKUP = 1.2;
+  const hose = () => {
     let line = null;
     const nz = tools.nozzle;
     const hoseMat = rubber(0x2f5a2a);
+    const coilYaw = Math.atan2(lab.hoseRest.pos.x - AT.x, lab.hoseRest.pos.z - AT.z);
     return {
-      name: 'hose', loop: true, blend: 0.35,
-      events: [{ t: 0, fn: () => { equip('L', null); equip('R', nz); sfx.play('hose'); } }],
-      stop() { if (line) { lab.scene.remove(line); line.geometry.dispose(); line = null; } equip('R', null); sfx.stop('hose'); },
+      name: 'hose', loop: true, blend: 0.3,
+      events: [
+        { t: 0, fn: () => { equip('L', null); equip('R', null); } },
+        { t: 0.5, fn: () => { equip('R', nz); sfx.play('grunt'); } },
+        { t: PICKUP, fn: () => sfx.play('hose') },
+      ],
+      stop() {
+        if (line) { lab.scene.remove(line); line.geometry.dispose(); line = null; }
+        equip('R', null);
+        restNozzle();
+        sfx.stop('hose');
+      },
       pose(t, p) {
-        const u = Math.min(1, t / duration);
-        const aim = V(0.55 + Math.sin(u * Math.PI * 3.5) * 2.4, 0, -0.4 + u * 2.7);
+        if (t < PICKUP) {
+          // Turn round, stoop, grab the nozzle, straighten up and turn back.
+          const turn = seg(t, 0, 0.4) * (1 - seg(t, 0.7, PICKUP));
+          const stoop = seg(t, 0.2, 0.45) * (1 - seg(t, 0.6, 0.95));
+          const yaw = coilYaw * turn;
+          sci.stand(p, AT, yaw, lab.hoseRest.pos);
+          const L = (x, y, z) => sci.local(AT, yaw, x, y, z);
+          p.spineX = 0.25 + stoop * 0.75;
+          p.hipsY -= stoop * 0.18;
+          if (t < 0.5) p.hR.p.copy(L(-0.25, 0.9, 0.15)).lerp(lab.hoseRest.pos.clone().add(V(0, 0.08, 0)), stoop);
+          else p.hR.p.copy(L(-0.1, 1.05 - stoop * 0.5, 0.4 - stoop * 0.1));
+          handQuat(V(0, -1, 0.4), V(1, 0, 0), p.hR.q);
+          p.hR.curl = t > 0.5 ? 0.9 : 0.3;
+          p.jaw = stoop * 0.3;
+          p.look.copy(t < 0.7 ? lab.hoseRest.pos : cam());
+          drawLine(t >= 0.5);
+          return;
+        }
+        // Spray: a steady side-to-side sweep.
+        const s = t - PICKUP;
+        const aim = V(0.55 + Math.sin(s * 1.5) * 2.3, 0, 1.0 + Math.sin(s * 0.8) * 0.25);
         sci.stand(p, AT, 0, aim);
         const L = (x, y, z) => sci.local(AT, 0, x, y, z);
         const wob = Math.sin(t * 13) * 0.025;
@@ -644,13 +684,20 @@ export function makeActions(lab, sfx) {
         p.hipsY -= 0.04;
         const tipW = sci.arms.R.grip.localToWorld(nz.userData.tip.clone());
         lab.water.setJet(tipW, aim);
-        onSpray?.(aim);
-        if (line) { lab.scene.remove(line); line.geometry.dispose(); }
-        const reel = lab.reel.getWorldPosition(V());
-        const back = sci.arms.R.grip.localToWorld(V(0, 0.08, 0));
-        const curve = new THREE.CatmullRomCurve3([reel, reel.clone().add(V(0.2, -0.9, 0.3)), back.clone().add(V(-0.2, -0.7, -0.1)), back]);
-        line = mesh(new THREE.TubeGeometry(curve, 30, 0.025, 6), hoseMat);
-        lab.scene.add(line);
+        drawLine(true);
+
+        // The hose runs from the coil, along the floor by his feet, up to his hands.
+        function drawLine(held) {
+          if (line) { lab.scene.remove(line); line.geometry.dispose(); line = null; }
+          const exit = lab.hoseExit.clone();
+          const end = held ? sci.arms.R.grip.localToWorld(V(0, 0.08, 0)) : lab.hoseRest.pos.clone();
+          const feet = AT.clone().add(V(-0.2, 0.03, -0.05));
+          const pts = held
+            ? [exit, exit.clone().lerp(feet, 0.5).setY(0.03), feet, end.clone().add(V(-0.05, -0.45, -0.05)), end]
+            : [exit, exit.clone().lerp(end, 0.5).setY(0.06), end];
+          line = mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 30, 0.025, 6), hoseMat);
+          lab.scene.add(line);
+        }
       },
     };
   };

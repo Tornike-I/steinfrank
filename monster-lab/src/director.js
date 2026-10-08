@@ -439,9 +439,9 @@ export class Director {
     // 4. Hose down the floor, back of the room to the front; the water runs
     // toward the viewer and carries the mess off the bottom of the screen.
     lab.water.start(this.creatures);
-    const hose = (this._hoseAction = A.hose({ duration: 3.6 }));
+    const hose = (this._hoseAction = A.hose());
     this.sci.play(hose);
-    await this._sleep(3.8, e);
+    await this._sleep(1.2 + 4.2, e); // pick up, then sweep side to side
     hose.stop();
     lab.water.stop();
     this.sci.play(A.celebrate(1.2, A.AT));

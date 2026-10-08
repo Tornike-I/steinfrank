@@ -74,6 +74,7 @@ export class Water {
     this.active = true;
     this.spraying = true;
     this.amount = 1;
+    this.jetReady = false; // no water until the nozzle is in his hands
     this.g.fillStyle = '#000';
     this.g.fillRect(0, 0, SIZE, SIZE);
     this.film.visible = true;
@@ -83,6 +84,7 @@ export class Water {
   setJet(from, to) {
     this.from.copy(from);
     this.to.copy(to);
+    this.jetReady = true;
   }
 
   // Stop spraying; the film keeps flowing off the bottom of the screen.
@@ -120,7 +122,7 @@ export class Water {
     g.drawImage(this.tmp, 0.6, shift);
     g.globalAlpha = 1;
 
-    if (this.spraying) {
+    if (this.spraying && this.jetReady) {
       // Paint fresh water where the jet lands, plus a little runoff streak.
       const [px, py] = this._px(this.to.x, this.to.z);
       const r = 16 + Math.random() * 6;
