@@ -1,12 +1,10 @@
-// Laboratory controller. A lab question is routed to a topic:
-//   - new topic  → the scientist builds that topic's monster (short
-//                  cinematic), its tab opens and the question is answered there
-//   - known topic → the existing monster charges the screen and screams,
-//                  then its tab opens with the question appended
+// Laboratory controller. The lab only builds: every prompt describes a job,
+// Frankenstein forges a monster for it (surgery cinematic) and its tab opens.
+// The job's topic only picks the monster's look and voice.
 // Prompts submitted during cleanup wait until the hose is done.
 import { state, save } from '../core/store.js';
 import { matchTheme, themeOf } from '../monsters/themes.js';
-import { findByTopic, draftAssistant, commitAssistant } from '../monsters/registry.js';
+import { draftAssistant, commitAssistant } from '../monsters/registry.js';
 import { limbLabel } from '../monsters/limbParts.js';
 import * as F from '../ai/frankenstein.js';
 import { monsterVoice } from '../audio/monsterVoice.js';
@@ -20,15 +18,10 @@ const VOICE_FOR_TOPIC = {
 };
 const isCzech = (text) => /[ěščřžůťďň]/i.test(text);
 
-// What we ask Frankenstein to build for a topic. A single free-text `question`
-// input keeps lab questions mappable onto every topic monster.
-function forgeBrief(th, question) {
-  return `A ${th.label} assistant monster that answers any question a user asks about ${th.label.toLowerCase()} in plain words.
-Inputs: exactly one required string input named "question" (the user's question about ${th.label.toLowerCase()}, maxLength 500).
-Gather facts with free limbs (web_search, http_fetch) where they help, then compose a short spoken answer and a markdown report.
-Stay strictly on the topic of ${th.label.toLowerCase()}; politely decline anything else.
-Example question: "${question.replace(/"/g, "'").slice(0, 200)}"
-Voice archetype: ${VOICE_FOR_TOPIC[th.id] || 'brute'}.${isCzech(question) ? ' The user writes in Czech: the monster speaks Czech (voice.language "cs").' : ''}`;
+function forgeBrief(th, job) {
+  return `Build a monster for this job, described by the user: "${job.replace(/"/g, "'").slice(0, 600)}"
+It will be run again and again for exactly this job. Give it the few simple inputs the job needs, each with a clear description.
+Voice archetype: ${VOICE_FOR_TOPIC[th.id] || 'brute'}.${isCzech(job) ? ' The user writes in Czech: the monster speaks Czech (voice.language "cs").' : ''}`;
 }
 
 // Publish with an ElevenLabs voice agent, sounds and birth scene? VITE_FRANK_VOICE=0 turns it off.
@@ -40,8 +33,8 @@ export class LabController {
     this.creatures = creatures;
     this.ui = ui;
     this.monsters = monsters;
-    this.busy = null; // { kind: 'create' | 'summon', topic }
-    this.queued = null; // question waiting for cleanup to finish
+    this.busy = null; // { kind: 'create', topic }
+    this.queued = null; // job waiting for cleanup to finish
   }
 
   get generating() { return !!this.busy || !!this.queued; }
@@ -58,53 +51,39 @@ export class LabController {
     save();
   }
 
-  send(question) {
-    question = question.trim();
-    if (!question || this.generating) return false;
-    const topic = matchTheme(question);
-    const label = themeOf(topic).label;
+  send(job) {
+    job = job.trim();
+    if (!job || this.generating) return false;
     if (this.director.cleaning) {
-      this.queued = question;
-      this.ui.banner(`Queued for the <b>${label}</b> monster — the lab is being hosed down…`, { busy: true });
+      this.queued = job;
+      this.ui.banner('Queued — the lab is being hosed down first…', { busy: true });
       this.ui.renderControls();
       return true;
     }
-    this._start(question);
+    this._start(job);
     return true;
   }
 
-  async _start(question) {
-    const topic = matchTheme(question);
+  async _start(job) {
+    const topic = matchTheme(job);
     const th = themeOf(topic);
-    const existing = findByTopic(topic);
-    if (existing) {
-      this.busy = { kind: 'summon', topic };
-      this.ui.banner(`Summoning the <b>${th.label}</b> monster`, { busy: true });
-      this.ui.renderControls();
-      await this.director.summon(existing);
-      this.busy = null;
-      this.ui.banner(null);
-      this.ui.renderControls();
-      this.ui.openMonster(existing.id);
-      this.monsters.ask(existing.id, question);
-      return;
-    }
-    const draft = draftAssistant(topic);
+    const draft = draftAssistant(topic, job);
     const forgeAbort = new AbortController();
     this.busy = { kind: 'create', topic, draft, forgeAbort };
     const real = F.backend.connected;
-    this.ui.banner(`Creating a <b>${th.label}</b> monster${real ? ' — Frankenstein is designing it…' : ''}`, { busy: true });
+    this.ui.banner(`Building a monster for: <b>${escapeHtml(job.slice(0, 90))}</b>${real ? ' — Frankenstein is designing it…' : ''}`, { busy: true });
     this.ui.renderControls();
 
     // Limbs come from Frankenstein's design (or the scripted workflow offline).
     const limbs = real
       ? (async () => {
-        const res = await F.forge(forgeBrief(th, question), forgeAbort.signal);
+        const res = await F.forge(forgeBrief(th, job), forgeAbort.signal);
         if (res.status === 'refused') throw new Error(`Frankenstein refused: ${res.reason}`);
         if (res.status !== 'draft') throw new Error(`Frankenstein couldn't design it: ${(res.errors || []).slice(0, 2).join('; ') || res.status}`);
         const card = await F.publish(res.spec.id, WITH_VOICE);
         draft.provider = { kind: 'frankenstein', monsterId: card.id, name: card.name, purpose: card.purpose, inputs: card.inputs, voice: card.has_voice };
         draft.birthUrl = card.voice?.birth_url || null;
+        draft.title = card.name;
         draft.limbs = card.limbs;
         return card.limbs;
       })()
@@ -112,7 +91,7 @@ export class LabController {
     limbs.then((names) => {
       if (this.busy?.draft !== draft) return;
       const list = [...new Set(names.map(limbLabel))];
-      this.ui.banner(`Creating a <b>${th.label}</b> monster — sewing on ${list.length} limb${list.length === 1 ? '' : 's'}: ${list.join(', ')}`, { busy: true });
+      this.ui.banner(`Building <b>${escapeHtml(draft.title || th.label + ' monster')}</b> — sewing on ${list.length} limb${list.length === 1 ? '' : 's'}: ${list.join(', ')}`, { busy: true });
     }, () => {});
 
     try {
@@ -131,7 +110,6 @@ export class LabController {
     this.ui.banner(null);
     this.ui.renderControls();
     this.ui.openMonster(a.id);
-    this.monsters.ask(a.id, question);
   }
 
   stop() {

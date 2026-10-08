@@ -42,6 +42,16 @@ export function mapInputs(schema, text) {
   const props = schema?.properties || {};
   if (props.question) return { question: t };
   const out = {};
+  // "name: value" pairs (lines, ";" or "·") fill several inputs at once.
+  const names = Object.keys(props);
+  if (names.length > 1) {
+    for (const part of t.split(/\n|;|·/)) {
+      const m = part.match(/^\s*([\w -]+?)\s*[:=]\s*(.+)$/);
+      const key = m && names.find((n) => n.toLowerCase() === m[1].trim().toLowerCase().replace(/ /g, '_'));
+      if (key) out[key] = coerce(props[key], m[2].trim());
+    }
+    if (Object.keys(out).length) return out;
+  }
   const strings = Object.entries(props).filter(([, p]) => p.type === 'string' && !p.enum);
   for (const [k, p] of Object.entries(props)) if (p.default !== undefined) out[k] = p.default;
   const required = schema?.required || [];
@@ -49,6 +59,8 @@ export function mapInputs(schema, text) {
   if (target) out[target[0]] = t;
   return out;
 }
+
+const coerce = (p, v) => (p?.type === 'number' || p?.type === 'integer' ? Number(v) : p?.type === 'boolean' ? /^(true|yes|1)$/i.test(v) : v);
 
 const specCache = new Map();
 

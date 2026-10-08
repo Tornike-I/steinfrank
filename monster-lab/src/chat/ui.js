@@ -3,20 +3,21 @@
 // a prompt; each monster tab shows its den above a familiar chat.
 import { state, save } from '../core/store.js';
 import { renderMarkdown } from './markdown.js';
-import { allMonsters } from '../monsters/registry.js';
+import { allMonsters, titleOf } from '../monsters/registry.js';
 import { themeOf } from '../monsters/themes.js';
 import { limbLabel } from '../monsters/limbParts.js';
 import { backend } from '../ai/frankenstein.js';
 
-const GREETINGS = ['Greetings, you absolute specimen.', 'Greetings, you absolute specimen.', 'Ask me anything. I have spare parts.', 'Lie down. Tell me everything.'];
+const GREETINGS = ['What shall we build tonight?', 'Name a chore. I have spare parts.', 'Every tedious job deserves a monster.', 'Describe the job. I will stitch the beast.'];
 
+// Jobs, not questions: the lab only builds monsters.
 const LAB_IDEAS = [
-  'Will it rain in Prague tomorrow?',
-  'How do I make a proper carbonara?',
-  'Plan three days in Lisbon',
-  'What is 17% of 2,450?',
-  'Prep me for my call with Acme Corp',
-  'Why do cats knead blankets?',
+  'Check whether an online shop is a scam',
+  'Prep a briefing on a company before a meeting',
+  'Audit a landing page and list the top fixes',
+  'Tell me if an Amazon product is worth buying',
+  'Summarize any web page in three sentences',
+  'Give me the weather outlook for a city',
 ];
 
 const ICON = {
@@ -145,15 +146,15 @@ export class ChatUI {
     e.main.classList.toggle('is-empty', !lab && (!conv || conv.messages.length === 0));
     if (lab) {
       e.greeting.textContent = this._greeting;
-      e.input.placeholder = 'Ask anything — the doctor will build (or fetch) the right monster…';
-      e.disclaimer.textContent = 'Each topic gets its own monster. Dr. Frankenstein can make mistakes. Mostly on purpose.';
+      e.input.placeholder = 'Describe a job for a new monster…';
+      e.disclaimer.textContent = 'Every job gets its own monster. Dr. Frankenstein can make mistakes. Mostly on purpose.';
     } else {
       const th = def ? themeOf(def.theme) : null;
       e.greeting.textContent = def ? `${def.name} ${th.intro}` : '';
-      e.input.placeholder = th?.placeholder || '';
+      e.input.placeholder = this._placeholder(def);
       const real = def?.provider?.kind === 'frankenstein';
       const limbs = def?.limbs?.length ? ` · limbs: ${[...new Set(def.limbs.map(limbLabel))].join(', ')}` : '';
-      e.disclaimer.textContent = def ? `${def.name} · ${th.label} · ${real ? `Frankenstein monster “${def.provider.monsterId}”` : 'simulated responses'}${limbs}` : '';
+      e.disclaimer.textContent = def ? `${def.name} · ${titleOf(def)} · ${real ? `Frankenstein monster “${def.provider.monsterId}”` : 'simulated responses'}${limbs}` : '';
     }
     this.renderIdeas();
     this.renderSidebar();
@@ -188,7 +189,7 @@ export class ChatUI {
     list.innerHTML = '';
     const mons = allMonsters();
     if (!mons.length) {
-      list.innerHTML = '<div class="conv-empty">No monsters yet. Ask the doctor a question in the Laboratory.</div>';
+      list.innerHTML = '<div class="conv-empty">No monsters yet. Describe a job in the Laboratory.</div>';
       return;
     }
     for (const d of mons) {
@@ -204,7 +205,8 @@ export class ChatUI {
       img.src = this.thumbnail?.(d) || '';
       const text = document.createElement('span');
       text.className = 'conv-title';
-      text.textContent = th.label;
+      text.textContent = titleOf(d);
+      text.title = d.job || th.label;
       const sub = document.createElement('small');
       sub.textContent = d.name;
       text.append(sub);
@@ -371,10 +373,18 @@ export class ChatUI {
     b.setAttribute('aria-label', b.title);
     b.disabled = !gen && !this.el.input.value.trim();
     if (state.mode === 'monsters' && this.mon?.awaitingAnswer) this.el.input.placeholder = `Answer ${this.mon.def.name}'s question…`;
-    else if (state.mode === 'monsters' && this.mon?.def) this.el.input.placeholder = themeOf(this.mon.def.theme).placeholder;
+    else if (state.mode === 'monsters' && this.mon?.def) this.el.input.placeholder = this._placeholder(this.mon.def);
     this._renderMic();
     this._refreshActions();
     this.renderSidebarBusy();
+  }
+
+  // Forged monsters say which inputs they need; several go as "name: value" lines.
+  _placeholder(def) {
+    const props = Object.entries(def?.provider?.inputs?.properties || {});
+    if (!props.length) return themeOf(def?.theme).placeholder;
+    if (props.length === 1) return props[0][1].description || `Give me the ${props[0][0]}…`;
+    return `Give me ${props.map(([k]) => `${k}: …`).join(' · ')}`;
   }
 
   _renderMic() {
@@ -401,7 +411,7 @@ export class ChatUI {
     if (state.mode === 'lab') e.model.innerHTML = 'Frankenstein <em>Laboratory</em>';
     else {
       const d = this.mon.def;
-      e.model.innerHTML = d ? `${esc(themeOf(d.theme).label)} <em>${esc(d.name)}</em>` : '';
+      e.model.innerHTML = d ? `${esc(titleOf(d))} <em>${esc(d.name)}</em>` : '';
     }
   }
 }

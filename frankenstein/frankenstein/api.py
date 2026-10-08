@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from . import channels, config, store, watches
 from .forge import pipeline, voice
-from .forge.estimator import estimate
+from .forge.estimator import estimate, step_estimates
 from .runtime import InputError, Runner
 
 logging.basicConfig(level=logging.INFO)
@@ -154,7 +154,8 @@ def list_monsters():
 
 @app.get("/monsters/{monster_id}")
 def get_monster(monster_id: str):
-    return _monster(monster_id).dump()
+    spec = _monster(monster_id)
+    return {**spec.dump(), "step_estimates": step_estimates(spec)}
 
 
 @app.get("/monsters/{monster_id}/voice-session")

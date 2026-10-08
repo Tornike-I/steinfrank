@@ -79,6 +79,10 @@ def _delta(after: Cost, before: Cost) -> Cost:
     return Cost(**{k: v - getattr(before, k) for k, v in asdict(after).items()})
 
 
+def _step_usage(ctx: RunContext, base: RunContext) -> dict:
+    return _delta(ctx.usage, base.usage).as_dict()
+
+
 class Runner:
     def __init__(self, limb_for=get_limb, dry_run: bool = False, decline_paid: bool = False):
         self.dry_run = dry_run
@@ -222,13 +226,14 @@ class Runner:
                     *(self._run_leaf(leaf, limb, args, c) for (leaf, limb, args, _), c in zip(launch, ctxs))
                 )
                 self._absorb(run, base, ctxs)
-                for (leaf, *_), result in zip(launch, results):
+                for (leaf, *_), result, c in zip(launch, results, ctxs):
+                    used = _step_usage(c, base)
                     if isinstance(result, Pending):
                         run["pending"][leaf.id] = result.state
-                        run["log"].append({"step": leaf.id, "event": "waiting", "detail": result.state})
+                        run["log"].append({"step": leaf.id, "event": "waiting", "detail": result.state, "usage": used})
                     else:
                         run["steps"][leaf.id] = result
-                        run["log"].append({"step": leaf.id, "event": "done"})
+                        run["log"].append({"step": leaf.id, "event": "done", "usage": used})
                 if run["pending"]:
                     run["status"] = "waiting"
                     store.save_run(run)
@@ -324,6 +329,7 @@ class Runner:
             spec = MonsterSpec.model_validate(run["spec"])
             for step_id, state in list(run["pending"].items()):
                 ctx = self._ctx(run, spec, step_id)
+                before = Cost(**run["usage"])
                 try:
                     res = await self.limb_for(self._leaf(spec, step_id).limb, spec).poll(state, ctx)
                 except Exception as e:
@@ -345,7 +351,7 @@ class Runner:
                 else:
                     run["steps"][step_id] = res
                     del run["pending"][step_id]
-                    run["log"].append({"step": step_id, "event": "done"})
+                    run["log"].append({"step": step_id, "event": "done", "usage": _delta(ctx.usage, before).as_dict()})
             store.save_run(run)
             if run["pending"]:
                 return run

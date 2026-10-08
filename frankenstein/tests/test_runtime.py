@@ -225,3 +225,15 @@ def test_input_checks():
     for bad in ({}, {"n": 1, "zzz": 1}, {"n": "x"}, {"n": 1, "s": "b"}, {"n": True}):
         with pytest.raises(InputError):
             check_inputs(schema, bad)
+
+
+def test_done_events_carry_per_step_usage():
+    spec = make(
+        [{"id": "g", "parallel": [{"id": "a", "limb": "spendy", "args": {"tokens": 300}},
+                                  {"id": "b", "limb": "spendy", "args": {"tokens": 50}}]},
+         {"id": "c", "limb": "echo", "args": {"x": 1}}],
+        policy={"max_llm_tokens": 1000},
+    )
+    r = run(spec, {})
+    used = {e["step"]: e["usage"]["llm_tokens"] for e in r["log"] if e["event"] == "done"}
+    assert used == {"a": 300, "b": 50, "c": 0}
