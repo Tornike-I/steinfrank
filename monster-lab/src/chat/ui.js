@@ -356,7 +356,7 @@ export class ChatUI {
   }
 
   renderControls() {
-    this.el.app.classList.toggle('lab-busy', !!this.lab?.generating);
+    this.el.app.classList.toggle('lab-busy', !!this.lab?.generating || !!this.lab?.director.cleaning);
     const c = this.ctrl;
     const gen = c?.generating;
     const b = this.el.send;

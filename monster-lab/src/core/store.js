@@ -57,3 +57,25 @@ export function save(immediate = false) {
 window.addEventListener('beforeunload', () => save(true));
 
 export const current = () => state.conversations.find((c) => c.id === state.currentId) || null;
+
+// Several tabs of the app share one localStorage key. Without syncing, a
+// stale tab's periodic save would overwrite assistants another tab created.
+// So adopt other tabs' writes: assistants merge by id (the copy with the
+// longer chat wins); this tab keeps its own lab creatures and UI mode.
+const listeners = new Set();
+export const onExternalChange = (fn) => listeners.add(fn);
+
+window.addEventListener('storage', (ev) => {
+  if (ev.key !== KEY || !ev.newValue) return;
+  let other;
+  try { other = JSON.parse(ev.newValue); } catch { return; }
+  let changed = false;
+  for (const m of other.monsters || []) {
+    const mine = state.monsters.find((x) => x.id === m.id);
+    if (!mine) { state.monsters.push(m); changed = true; }
+    else if ((m.chat?.length || 0) > (mine.chat?.length || 0) && !mine._live) { Object.assign(mine, m); changed = true; }
+  }
+  for (const id of other.deletedPresets || []) if (!state.deletedPresets?.includes(id)) (state.deletedPresets ||= []).push(id);
+  if (other.settings?.threshold) state.settings.threshold = other.settings.threshold;
+  if (changed) for (const fn of listeners) fn();
+});

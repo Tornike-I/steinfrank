@@ -30,6 +30,8 @@ const SHOTS = {
   // Pulled back so the floor in front of the scientist (where monsters roam) is in view.
   floor: { target: V(0.55, 0.85, 0.75), dir: V(0.08, 0.34, 1), fitH: 2.5, fitW: 5.6, fov: 32 },
   cleanup: { target: V(0.55, 0.8, 0.9), dir: V(0.05, 0.4, 1), fitH: 2.7, fitW: 6.0, fov: 32 },
+  // Low, eye-level framing for a monster charging at the viewer.
+  summon: { target: V(0.55, 0.9, 2.2), dir: V(0.04, 0.1, 1), fitH: 2.2, fov: 32 },
 };
 
 export class Director {
@@ -133,8 +135,8 @@ export class Director {
     const sci = this.sci;
     if (this.where === 'idle' && !this.op) {
       sci.play(this.A.celebrate(2.6, SPOTS.idle));
-      this._shot('floor', { speed: 2.4 });
     }
+    this._shot('summon', { speed: 2.6 });
     await this.creatures.summon(
       { seed: def.seed, theme: def.theme, defId: def.id, name: themeLabel(def), limbs: def.limbs || [] },
       {
@@ -142,9 +144,11 @@ export class Director {
           this.sfx.play('scream');
           this.lab.rig.shake = 0.6;
         },
+        target: V(0.55, 0, 3.75),
       },
     );
     if (this.where === 'idle' && !this.op) sci.play(this.A.idle());
+    if (!this.op && !this.cleaning) this._shot(this._idleShot(), { speed: 1.8 });
   }
 
   complete({ messageId, monsterId }) {
@@ -230,8 +234,12 @@ export class Director {
         await this._w(this._deliverLimb(op.patient, op.limbQueue.shift()), e);
         if (op.aborted) break;
         kind = 'attach';
-      } else if (op.done && !first && count >= (op.minActions || 1) && !op.patient.nextDetached()) break;
-      else kind = first ? 'incise' : this._nextAction(op.patient, last);
+      } else if (first) kind = 'incise';
+      // Design is back: sew on whatever is still loose, then finish.
+      else if (op.done && op.patient.nextDetached()) kind = 'attach';
+      else if (op.done && count >= (op.minActions || 1)) break;
+      // Still waiting on Frankenstein: keep operating.
+      else kind = this._nextAction(op.patient, last);
       count++;
       const action = A[kind](op.patient);
       this._frameAction(kind, action);
@@ -425,12 +433,10 @@ export class Director {
     const melt = await this._w(acidArrived, e);
     await this._w(melt, e);
 
-    // 4. Hose the screen top to bottom.
-    const hose = (this._hoseAction = A.hose());
+    // 4. Hose down the floor, back of the room to the front.
+    const hose = (this._hoseAction = A.hose({ duration: 3.4, onSpray: (p) => this.creatures.washAt(p, 0.55) }));
     this.sci.play(hose);
-    await this._sleep(0.5, e);
-    const H = window.innerHeight;
-    await this._w(this.overlay.wash(2.0, (y) => this.creatures.wash(y / H)), e);
+    await this._sleep(3.6, e);
     hose.stop();
     this._hoseAction = null;
 

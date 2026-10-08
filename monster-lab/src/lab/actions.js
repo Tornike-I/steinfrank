@@ -612,7 +612,9 @@ export function makeActions(lab, sfx) {
     },
   });
 
-  const hose = () => {
+  // Hose down the lab floor: the aim sweeps the floor from the back of the
+  // room toward the front in zigzags; onSpray(point) reports where water lands.
+  const hose = ({ duration = 3.2, onSpray } = {}) => {
     let line = null;
     const nz = tools.nozzle;
     const hoseMat = rubber(0x2f5a2a);
@@ -621,14 +623,14 @@ export function makeActions(lab, sfx) {
       events: [{ t: 0, fn: () => { equip('L', null); equip('R', nz); sfx.play('hose'); } }],
       stop() { if (line) { lab.scene.remove(line); line.geometry.dispose(); line = null; } equip('R', null); sfx.stop('hose'); },
       pose(t, p) {
-        const c = cam();
-        sci.stand(p, AT, 0, c);
+        const u = Math.min(1, t / duration);
+        const aim = V(0.55 + Math.sin(u * Math.PI * 3.5) * 2.4, 0, -0.4 + u * 2.7);
+        sci.stand(p, AT, 0, aim);
         const L = (x, y, z) => sci.local(AT, 0, x, y, z);
         const wob = Math.sin(t * 13) * 0.025;
-        // Sweep the aim from the top of the frame to the bottom.
-        const sweep = Math.min(1, t / 2.0);
-        const aim = c.clone().add(V(0, 0.5 - sweep * 1.0, 0));
-        const nzPos = L(-0.08 + wob, 1.25 + wob, 0.42);
+        // Twist toward wherever the jet is going.
+        p.spineY = THREE.MathUtils.clamp(Math.atan2(aim.x - AT.x, aim.z - AT.z), -1.1, 1.1) * 0.7;
+        const nzPos = L(-0.08 + wob, 1.15 + wob, 0.42).add(V(Math.sin(p.spineY) * 0.3, 0, 0));
         const dir = aim.clone().sub(nzPos).normalize();
         handQuat(dir, V(1, 0, 0), p.hR.q);
         p.hR.p.copy(wristFor(nzPos, p.hR.q, V()));
@@ -641,7 +643,9 @@ export function makeActions(lab, sfx) {
         p.brow = 0.6;
         p.hipsY -= 0.04;
         const tipW = sci.arms.R.grip.localToWorld(nz.userData.tip.clone());
-        lab.fx.spray(tipW, dir, 10, 0x7fb8ff, 7);
+        lab.fx.jet(tipW, aim, 18);
+        lab.fx.washSplats(aim, 0.6);
+        onSpray?.(aim);
         if (line) { lab.scene.remove(line); line.geometry.dispose(); }
         const reel = lab.reel.getWorldPosition(V());
         const back = sci.arms.R.grip.localToWorld(V(0, 0.08, 0));

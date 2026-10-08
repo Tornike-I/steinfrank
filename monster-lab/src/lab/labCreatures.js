@@ -134,7 +134,7 @@ export class LabCreatures {
   // An existing assistant answers a lab question: its counterpart turns to
   // the viewer, charges at the camera and screams. If it was destroyed, a
   // temporary stand-in walks in from the side for the transition.
-  summon(rec, { onScream } = {}) {
+  summon(rec, { onScream, target: at } = {}) {
     return new Promise((resolve) => {
       let c = [...this.creatures.values()].find((x) => x.defId === rec.defId && x.state === 'alive');
       let temporary = false;
@@ -143,10 +143,11 @@ export class LabCreatures {
         c.pos.set(Math.random() < 0.5 ? -3.0 : 3.8, 0, 1.6);
         c.temporary = temporary = true;
       }
-      const cam = this.camera.position.clone();
-      const fwd = V(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0).normalize();
-      const target = cam.clone().addScaledVector(fwd, 1.3 + c.m.height * 0.6).setY(0);
-      target.z = Math.min(target.z, 3.2);
+      let target = at?.clone();
+      if (!target) {
+        const fwd = V(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0).normalize();
+        target = this.camera.position.clone().addScaledVector(fwd, 1.3 + c.m.height * 0.6).setY(0);
+      }
       c.state = 'summoned';
       c.sum = { t: 0, from: c.pos.clone(), home: c.pos.clone(), target, onScream, resolve, temporary, screamed: false };
       this._place(c);
@@ -231,14 +232,13 @@ export class LabCreatures {
     return wait(400 + list.length * 110 + 1900);
   }
 
-  // Hose progress 0..1: stains wash away from the back of the room forward
-  // (top of the screen to the bottom).
-  wash(u) {
-    for (const d of this.decals) {
-      const k = THREE.MathUtils.clamp((d.pos.z + 1.2) / 3.6, 0, 1);
-      if (u >= k) d.fade = true;
-    }
+  // The hose jet lands at `p`: stains (and anything left over) within r wash away.
+  washAt(p, r = 0.5) {
+    for (const d of this.decals) if (!d.fade && Math.hypot(d.pos.x - p.x, d.pos.z - p.z) < r + d.r * 0.5) d.fade = true;
     for (const s of this.sprites) s.fade = true;
+    for (const c of [...this.creatures.values()]) {
+      if ((c.state === 'dead' || c.state === 'dissolving') && Math.hypot(c.pos.x - p.x, c.pos.z - p.z) < r) this._remove(c);
+    }
   }
 
   // ------------------------------------------------------------ picking

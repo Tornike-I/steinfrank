@@ -244,7 +244,7 @@ export const THEMES = Object.fromEntries([
     },
   }),
   T('gardening', 'Gardening', {
-    keywords: ['garden', 'plant', 'flower', 'grow', 'seed', 'soil', 'tree', 'houseplant', 'compost', 'tomato', 'lawn', 'prune', 'watering'],
+    keywords: ['garden', 'plant', 'flower', 'grow', 'seed', 'soil', 'tree', 'houseplant', 'compost', 'tomato', 'lawn', 'prune', 'watering', 'cactus', 'succulent', 'repot', 'orchid', 'weeds', 'fertili'],
     names: [['Moss', 'Mulch', 'Root', 'Thistle'], ['belly', 'gut', 'sprout', 'muck']],
     intro: 'shakes soil out of its ears.',
     placeholder: 'Ask about plants and gardens…',

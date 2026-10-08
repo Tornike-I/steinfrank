@@ -16,7 +16,7 @@ import { buildFor, getMonster } from './monsters/registry.js';
 import { animateMonster } from './monsters/monsterAnim.js';
 import { disposeMonster } from './monsters/monsterGen.js';
 import { ChatUI } from './chat/ui.js';
-import { state } from './core/store.js';
+import { state, onExternalChange } from './core/store.js';
 
 const canvas = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
@@ -71,7 +71,7 @@ const director = new Director({
   canCleanup: () => state.mode === 'lab',
   onMonsterBorn: () => { ctrl.persistCreatures(); ui.renderHeader(); },
   onCreaturesChanged: () => ctrl.persistCreatures(),
-  onCleanupStart: () => ui.renderHeader(),
+  onCleanupStart: () => { ui.renderHeader(); ui.renderControls(); },
   onCleanupDone: () => ctrl.onCleanupDone(),
 });
 
@@ -139,6 +139,7 @@ if (state.mode === 'monsters') den.setMonster(mon.def);
 ctrl.init();
 ui.renderAll();
 F.watchHealth(() => ui.renderHeader());
+onExternalChange(() => ui.renderSidebar());
 director.greet();
 
 // --- clicking wandering monsters (Lab tab) --------------------------------

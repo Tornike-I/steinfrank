@@ -105,6 +105,21 @@ export class LabFx {
       this.glow.add({ p: pos.clone(), v, life: 0.5 + Math.random() * 0.4, max: 0.9, size: 0.04 + Math.random() * 0.08, color: cols[i % 4], g: -1, drag: 2.5, grow: 2.5, fade: true });
     }
   }
+  // A ballistic water jet from `from` that lands on `to` after `T` seconds,
+  // splashing where it hits.
+  jet(from, to, n = 10, T = 0.45) {
+    const g = 9.8;
+    for (let i = 0; i < n; i++) {
+      const end = to.clone().add(V((Math.random() - 0.5) * 0.12, 0, (Math.random() - 0.5) * 0.12));
+      const v = end.clone().sub(from).multiplyScalar(1 / T).add(V(0, 0.5 * g * T, 0));
+      this.glow.add({ p: from.clone(), v, life: T * (0.9 + Math.random() * 0.1), max: T, size: 0.014 + Math.random() * 0.016, color: 0xa8d8ff, g, drag: 0, stretch: true });
+    }
+    for (let i = 0; i < 9; i++) {
+      const v = V((Math.random() - 0.5) * 1.6, 0.8 + Math.random() * 1.2, (Math.random() - 0.5) * 1.6);
+      this.glow.add({ p: to.clone().setY(0.03), v, life: 0.35, max: 0.35, size: 0.01 + Math.random() * 0.012, color: 0xcfe8ff, g: 9.8, drag: 0.5, stretch: true, fade: true });
+    }
+  }
+
   // Acid droplets / goo.
   goo(pos, n = 20, spread = 1.5) {
     for (let i = 0; i < n; i++) {
@@ -115,6 +130,7 @@ export class LabFx {
 
   addSplat(pos, size, color = 0x5a0204) {
     const i = this._splat++ % this.splatMesh.instanceMatrix.count;
+    (this._splatPos ||= [])[i] = pos.clone();
     _q.setFromAxisAngle(V(1, 0, 0), -Math.PI / 2);
     _m.compose(pos, _q, _s.set(size * (0.7 + Math.random() * 0.6), size, 1));
     this.splatMesh.setMatrixAt(i, _m);
@@ -123,7 +139,22 @@ export class LabFx {
     this.splatMesh.instanceMatrix.needsUpdate = true;
     this.splatMesh.instanceColor.needsUpdate = true;
   }
-  clearSplats() { this._splat = 0; this.splatMesh.count = 0; }
+  clearSplats() { this._splat = 0; this.splatMesh.count = 0; this._splatPos = []; }
+
+  // Hose water: blood splats on the floor near `p` are washed away.
+  washSplats(p, r) {
+    if (!this._splatPos) return;
+    let any = false;
+    this._splatPos.forEach((q, i) => {
+      if (q && q.y < 0.05 && Math.hypot(q.x - p.x, q.z - p.z) < r) {
+        _m.makeScale(0, 0, 0);
+        this.splatMesh.setMatrixAt(i, _m);
+        this._splatPos[i] = null;
+        any = true;
+      }
+    });
+    if (any) this.splatMesh.instanceMatrix.needsUpdate = true;
+  }
 
   // Jagged electric arc, regenerated in steps. Returns a stop function.
   bolt(from, to, duration = 0.8, color = 0xbfe8ff) {
