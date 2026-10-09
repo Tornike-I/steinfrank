@@ -153,6 +153,11 @@ ctrl.init();
 // Restored monsters are on the floor: start on the view that shows them.
 director._shot(director._idleShot(), { cut: true });
 ui.renderAll();
+// Sound is on by default, but browsers only allow audio after the first click.
+if (state.settings.sound) {
+  const unlock = () => { sfx.setEnabled(true); window.removeEventListener('pointerdown', unlock); };
+  window.addEventListener('pointerdown', unlock);
+}
 F.watchHealth(() => ui.renderHeader());
 onExternalChange(() => ui.renderSidebar());
 director.greet();

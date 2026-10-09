@@ -70,7 +70,7 @@ cheers when done.
 Off-topic questions are redirected ("That sounds like a question for the
 Cooking monster — ask it in the Laboratory").
 
-Sound starts **muted**. All sound effects are synthesised with WebAudio.
+Sound is **on** by default (it starts with your first click, as browsers require) and the speaker button remembers your choice. Sound effects are synthesised with WebAudio; monster voices and sounds come from ElevenLabs.
 
 ---
 
@@ -246,7 +246,7 @@ Odd Jobs.
   monsters: [...assistants],                       // tabs + histories
   labCreatures: [{ id, seed, defId, theme, name, state: 'alive'|'dead', x, y, side }],
   mode: 'lab' | 'monsters', selectedMonster,
-  settings: { threshold: 8, sound: false },        // sound always starts muted
+  settings: { threshold: 8, sound: true },         // sound on by default, remembered
 }
 ```
 

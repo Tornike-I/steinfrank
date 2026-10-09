@@ -81,6 +81,7 @@ export class ChatUI {
 
     e.sound.addEventListener('click', () => {
       state.settings.sound = !state.settings.sound;
+      state.settings.soundChosen = true;
       onSound(state.settings.sound);
       this.renderHeader();
     });

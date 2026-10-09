@@ -9,7 +9,7 @@ const defaults = () => ({
   mode: 'lab', // 'lab' | 'monsters' | 'library'
   libraryView: 'roam', // 'roam' | 'cards'
   selectedMonster: null,
-  settings: { threshold: 8, sound: false },
+  settings: { threshold: 8, sound: true },
 });
 
 function load() {
@@ -27,8 +27,8 @@ function load() {
       libraryView: data.libraryView === 'cards' ? 'cards' : 'roam',
       selectedMonster: data.selectedMonster ?? null,
       deletedPresets: Array.isArray(data.deletedPresets) ? data.deletedPresets : [],
-      // Sound always starts muted, regardless of the last session.
-      settings: { ...d.settings, ...(data.settings || {}), sound: false },
+      // Saves from before sound defaulted to on always stored "off"; only a real click counts.
+      settings: { ...d.settings, ...(data.settings || {}), sound: data.settings?.soundChosen ? !!data.settings.sound : true },
     };
   } catch {
     return defaults();
