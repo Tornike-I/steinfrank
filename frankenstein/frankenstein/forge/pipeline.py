@@ -28,6 +28,8 @@ Paid steps were mocked: their placeholder output stands in for a real result, so
 - more than about 5 sentences, or the verdict is not first;
 - the core data the job needs is missing or empty in the report (n/a, "no data returned", status 0, fetch errors),
   yet the speech presents a normal or confident result instead of saying the data could not be obtained;
+- the speech does not actually answer (no concrete facts, numbers or verdict; only "found information", "data is
+  available" or "see the report");
 - a failed fetch or missing data is treated as evidence for the verdict (e.g. "site unreachable" as a scam signal
   when the URL itself was malformed).
 Reply with JSON {"problems": ["<concrete problem and which case>", ...]} and an empty list if it is fine."""

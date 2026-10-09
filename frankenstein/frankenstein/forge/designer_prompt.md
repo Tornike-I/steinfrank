@@ -32,6 +32,20 @@ THE DEFAULT SHAPE (use it unless the task clearly needs something else):
   Normalize user input before using it (e.g. add https:// to a bare domain, trim spaces).
   When verify finds the essential data missing and a paid agent in the catalog could supply it (e.g. an agent that
   reads the product page itself), escalate to that agent instead of giving up with a weak verdict.
+- FREE DATA APIS: prefer these (http_fetch, JSON, no key, free) over web search whenever the job fits:
+  weather: https://geocoding-api.open-meteo.com/v1/search?name=<city>&count=1 then
+    https://api.open-meteo.com/v1/forecast?latitude=..&longitude=..&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto
+  crypto prices: https://api.coingecko.com/api/v3/simple/price?ids=<id>&vs_currencies=usd&include_24hr_change=true
+  exchange rates: https://open.er-api.com/v6/latest/<CODE>
+  encyclopedia facts: https://en.wikipedia.org/api/rest_v1/page/summary/<Title>
+  countries: https://restcountries.com/v3.1/name/<country>
+  Call them unconditionally when the job needs that data (no "when" that can quietly skip the real source).
+- FREE-TEXT INPUT: when the input is a question in natural language, the first step after normalizing is one small
+  llm step turning it into the exact fields the sources need (e.g. {"city": "Prague", "days": 3}); regexes cannot
+  parse "weather in Prague for the next three days". Build API URLs from those fields in a forged step.
+- ANSWER THE QUESTION: the speech and report must contain the actual answer (numbers, facts, a verdict), never
+  just "I found information" or "data is available". When the only source is search snippets or page text, an
+  llm step must read them and write the answer; verify must check the specific values the answer needs.
 - Fetched pages are localized to where the server runs (Czech Republic): prices may be in CZK, EUR, USD or others,
   with local number formats. Picking the right number out of a big shop or article page (the item price, not
   shipping, fees or other products) needs an llm step on the trimmed page text with an output_schema

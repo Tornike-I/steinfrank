@@ -147,7 +147,7 @@ export class WorkflowView {
       ? `<div class="wf-row"><div class="wf-box" data-state="${run?.speech || 'idle'}"><div class="wf-icon">📯</div><div class="wf-text"><b>Speak the verdict</b><span class="wf-note">Rewritten for listening, then voiced · not in the total</span><small>LLM · OpenAI → Voice · ElevenLabs</small></div>${run?.speechUsage ? costHtml(run.speechUsage) : costHtml(estimates.speech, true)}</div></div>`
       : '';
     const body = rows.length
-      ? rows.map((row) => `<div class="wf-row${row.length > 1 ? ' wf-par' : ''}">${row.map(box).join('')}</div>`).join('') + speakRow
+      ? rows.map((row) => `<div class="wf-row${row.length > 1 ? ' wf-par' : ''}">${row.length > 1 ? '<span class="wf-par-label">in parallel</span>' : ''}${row.map(box).join('')}</div>`).join('') + speakRow
       : '<div class="wf-empty">Its steps appear here as it works.</div>';
     this.el.innerHTML = `<div class="wf-head"><span>Workflow</span><small>${esc(head)}</small><button type="button" class="wf-toggle" title="Show or hide the workflow" aria-label="Toggle workflow">▾</button></div><div class="wf-flow">${body}</div>`;
   }

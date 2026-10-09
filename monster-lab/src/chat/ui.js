@@ -414,7 +414,11 @@ export class ChatUI {
   _placeholder(def) {
     const props = Object.entries(def?.provider?.inputs?.properties || {});
     if (!props.length) return themeOf(def?.theme).placeholder;
-    if (props.length === 1) return props[0][1].description || `Give me the ${props[0][0]}…`;
+    const label = (k) => k.replace(/_/g, ' ');
+    if (props.length === 1) {
+      const d = props[0][1].description || '';
+      return d && d.length <= 30 ? d : `Your ${label(props[0][0])}…`;
+    }
     return `Give me ${props.map(([k]) => `${k}: …`).join(' · ')}`;
   }
 

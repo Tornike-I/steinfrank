@@ -26,8 +26,12 @@ def _catalog_text(limbs: list[dict], agents: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Known-good designs only: showing whatever happens to be published lets one bad monster get copied.
+EXAMPLES = ("page-narrator",)
+
+
 def _examples() -> str:
-    specs = store.list_monsters()[:2]
+    specs = [s for s in (store.load_monster(i) for i in EXAMPLES) if s]
     if not specs:
         return ""
     shown = [s.model_dump(by_alias=True, exclude={"estimate", "safety", "voice", "examples"}) for s in specs]
