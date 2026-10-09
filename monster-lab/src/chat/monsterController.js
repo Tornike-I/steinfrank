@@ -10,9 +10,10 @@ import { respond, frankensteinSpec } from '../ai/assistants.js';
 import { monsterVoice } from '../audio/monsterVoice.js';
 
 export class MonsterController {
-  constructor({ den, ui }) {
+  constructor({ den, ui, wf }) {
     this.den = den;
     this.ui = ui;
+    this.wf = wf;
     this.gens = new Map(); // assistant id → { msgId, ctrl }
     this.waiting = new Map(); // assistant id → { msg, reply } while a run asks a question
     this.decisions = new Map(); // message id → decide(approve) for paid-step confirmations
@@ -37,6 +38,7 @@ export class MonsterController {
     state.selectedMonster = id;
     save();
     this.den.setMonster(this.def);
+    this.wf?.show(this.def);
     if (changed) this._sounds(this.def).then((s) => monsterVoice.sound(s?.arrive));
   }
 
@@ -124,15 +126,18 @@ export class MonsterController {
     const live = () => state.mode === 'monsters' && this.den.def?.id === def.id;
     const history = def.chat.slice(0, -1).map(({ role, content }) => ({ role, content }));
     try {
+      this.wf?.begin(def);
       const sounds = await this._sounds(def);
       for await (const ev of respond(def, input, { signal: ctrl.signal, history, onRun })) {
         if (ev.type === 'step') {
           if (live()) monsterVoice.startLoop(sounds?.working);
           msg.steps.push({ id: ev.step.id, label: ev.step.label, kind: ev.step.kind, limb: ev.step.limb, state: 'running' });
+          this.wf?.step(def, ev.step);
           if (live()) this.den.onStep(ev.step);
         } else if (ev.type === 'stepDone') {
           const s = msg.steps.find((x) => x.id === ev.step.id);
           if (s) s.state = ev.outcome && ev.outcome !== 'done' ? ev.outcome : 'done';
+          this.wf?.stepDone(def, ev.step, ev.outcome || 'done', ev.usage);
           if (live()) this.den.onStepDone(ev.step);
         } else if (ev.type === 'question') {
           msg.question = { text: ev.text, answer: null };
@@ -144,6 +149,7 @@ export class MonsterController {
           this.decisions.set(msg.id, ev.decide);
         } else if (ev.type === 'speech') {
           msg.speech = ev.text;
+          this.wf?.speech(def);
           monsterVoice.stopLoop();
           if (live()) monsterVoice.sound(sounds?.done);
           // In a live voice call the agent reads the verdict itself.
@@ -163,6 +169,7 @@ export class MonsterController {
       for (const s of msg.steps) if (s.state === 'running') s.state = 'cancelled';
       if (live()) this.den.onFail(stopped);
     } finally {
+      this.wf?.finish(def, msg.status);
       monsterVoice.stopLoop();
       if (this.gens.get(def.id)?.msgId === msg.id) this.gens.delete(def.id);
       if (this.waiting.get(def.id)?.msg === msg) this.waiting.delete(def.id);

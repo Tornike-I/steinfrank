@@ -11,6 +11,7 @@ import { Director } from './director.js';
 import { LabController } from './lab/labController.js';
 import * as F from './ai/frankenstein.js';
 import { MonsterController } from './chat/monsterController.js';
+import { WorkflowView } from './chat/workflowView.js';
 import { Den } from './den/den.js';
 import { monsterVoice } from './audio/monsterVoice.js';
 import { LiveVoice } from './ai/liveVoice.js';
@@ -79,7 +80,8 @@ const director = new Director({
   onCleanupDone: () => ctrl.onCleanupDone(),
 });
 
-const mon = new MonsterController({ den, ui });
+const wf = new WorkflowView(document.getElementById('workflow'));
+const mon = new MonsterController({ den, ui, wf });
 const voice = new LiveVoice({ mon, onChange: () => ui.renderControls() });
 mon.onSelect = (id) => { if (voice.state !== 'off' && voice.monsterId !== id) voice.stop(); };
 ctrl = new LabController({ director, creatures, ui, monsters: mon });
@@ -141,7 +143,7 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-if (state.mode === 'monsters') den.setMonster(mon.def);
+if (state.mode === 'monsters') { den.setMonster(mon.def); wf.show(mon.def); }
 ctrl.init();
 // Restored monsters are on the floor: start on the view that shows them.
 director._shot(director._idleShot(), { cut: true });

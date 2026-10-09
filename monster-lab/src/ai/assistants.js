@@ -103,7 +103,7 @@ async function* frankensteinRun(assistant, input, { signal, onRun }) {
         if (i < 0) continue;
         if (!started.has(ev.step)) { started.add(ev.step); yield { type: 'step', step: stepOf(leaves[i], i) }; }
         finished.add(ev.step);
-        yield { type: 'stepDone', step: stepOf(leaves[i], i), outcome: ev.event };
+        yield { type: 'stepDone', step: stepOf(leaves[i], i), outcome: ev.event, usage: ev.usage || null };
       }
       // Running: the unfinished leaves of the first unfinished top-level step.
       if (['queued', 'running', 'waiting', 'needs_input', 'needs_confirmation'].includes(r.status)) {

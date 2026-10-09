@@ -112,7 +112,7 @@ export class ChatUI {
     if (state.mode === mode && !changed) return;
     state.mode = mode;
     save();
-    if (mode === 'monsters') this.mon.den.setMonster(this.mon.def);
+    if (mode === 'monsters') { this.mon.den.setMonster(this.mon.def); this.mon.wf?.show(this.mon.def); }
     this.onMode?.(mode);
     this.renderAll();
   }
