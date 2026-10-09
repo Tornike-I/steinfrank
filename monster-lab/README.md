@@ -26,19 +26,12 @@ npm run build      # static bundle in dist/
 - The 3D lab fills most of the screen. The scientist, operating table and
   wandering monsters are in the scene, with a single prompt bar at the
   bottom. **No text answers are shown here.**
-- Typing a question detects its **topic** (20 topics, see §4). A banner shows
-  what will happen:
-  - **New topic:** "Creating a Weather monster". This plays a short
-    surgical cinematic: pull back to the slab, incision close-up, attach or
-    sew, lever, lightning, reveal. The monster leaps off the table and starts
-    wandering, its tab is created and opened, and the question is answered
-    there.
-  - **Existing topic:** "Summoning the Weather monster". Its wandering
-    counterpart turns to face the viewer, charges at the screen growing huge,
-    and screams ("AAAARGH!" visually; audio only when sound is on). Then its
-    tab opens with the question appended. If the counterpart was destroyed in
-    cleanup, a temporary stand-in walks in for the transition. No duplicate
-    assistant is ever created.
+- The Lab **only builds monsters**. You describe a job ("check whether an
+  online shop is a scam"); Frankenstein forges a monster for it while the
+  surgical cinematic plays (pull back to the slab, incision, sew, lever,
+  lightning, reveal). The monster leaps off the table, starts wandering, and
+  its tab opens. The job's detected **topic** (20 topics, see §4) only picks
+  the monster's look and voice; any number of monsters can share a topic.
 - **Stop during creation:** the scientist hoists the unfinished body into the
   bin and returns to idle. No assistant or tab is created.
 - **Clicking a wandering monster** (or its name tag) opens its tab.
@@ -49,6 +42,11 @@ npm run build      # static bundle in dist/
   counterparts**; assistants, tabs and histories are never touched. You can
   keep typing during cleanup, and a submitted question is queued until the
   wash ends.
+
+### Library tab
+All your monsters, in two views: **Roam**, a 3D hall where they wander (fliers
+fly overhead) and clicking one opens its tab, and **Cards**, with each
+monster's portrait, job, body plan, voice, tools and cost per run.
 
 ### Monster tabs (sidebar)
 The sidebar is the tab list: a permanent **Laboratory** tab, then one

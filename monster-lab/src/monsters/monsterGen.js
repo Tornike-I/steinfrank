@@ -51,8 +51,7 @@ export function buildMonster(seed, spec = {}) {
   const bloodMat = blood();
   mats.push(toothMat);
 
-  // Newer monsters get far more varied body plans and sizes. These draws use
-  // their own stream so monsters saved before keep their exact look.
+  // Variety draws use their own stream so monsters saved earlier keep their exact look.
   const vr = spec.variety ? new Rng((seed ^ 0x5bd1e995) >>> 0) : null;
   const plan = vr ? vr.weighted(PLANS) : 'classic';
   const sizeMul = vr ? vr.weighted(SIZES)(vr) : 1;
@@ -376,7 +375,6 @@ export function buildMonster(seed, spec = {}) {
     pivot.rotation.z = headCount === 2 ? (h === 0 ? 0.25 : -0.25) : 0;
     let neckLen = r.chance(0.4) ? r.float(0.05, 0.16) : 0.0;
     if (plan === 'hydra') {
-      // Necks fan out from the shoulders and sway on their own.
       const a = (h / (headCount - 1) - 0.5) * 2;
       neckLen = vr.float(0.2, 0.42) * (1 - Math.abs(a) * 0.2);
       pivot.position.copy(topC).add(V(a * topRad.x * 0.55, -0.04, topRad.z * 0.05 - Math.abs(a) * 0.03));
@@ -653,7 +651,7 @@ export function buildMonster(seed, spec = {}) {
 
   const flies = plan === 'flyer' || plan === 'jelly';
   const gait = flies ? 'fly' : plan === 'serpent' ? 'slither' : legCount === 1 ? 'hop' : legCount === 2 ? 'waddle' : 'scuttle';
-  // Fliers hover; the height is in the body's unscaled units.
+  // Hover height is in the body's unscaled units.
   const hover = flies ? vr.float(0.22, 0.45) / k : 0;
   const monster = {
     seed, root, body, torso, torsoCenter: tc, torsoRadii: rad, legs, arms, heads, eyes, mouths, tail,
@@ -769,8 +767,7 @@ function bone(a, b, radii, mat) {
   return m;
 }
 
-// Bat-like stitched wings on the upper back. Full-size wings flap fast (the
-// monster flies); small ones on a walker just twitch.
+// Full-size wings flap fast (the monster flies); small ones on a walker just twitch.
 function wings({ vr, body, tc, rad, M, donor, threadMat, updaters }, scale) {
   const span = Math.max(rad.x, rad.y) * vr.float(2.3, 3.1) * scale;
   const membrane = M(vr.chance(0.5) ? donor() : vr.pick([0x4a3a3a, 0x3a4a3a, 0x5a3a5a, 0x6a5a40]), { rough: 0.9 });
@@ -990,3 +987,12 @@ const EXTRAS = {
     body.add(pipe);
   },
 };
+
+// A monster's body plan and size class, without building it.
+export function bodyOf(seed, variety) {
+  if (!variety) return { plan: 'classic', size: 'normal' };
+  const vr = new Rng((seed ^ 0x5bd1e995) >>> 0);
+  const plan = vr.weighted(PLANS);
+  const mul = vr.weighted(SIZES)(vr);
+  return { plan, size: mul < 0.7 ? 'tiny' : mul > 1.5 ? 'giant' : mul > 1.1 ? 'big' : 'normal' };
+}

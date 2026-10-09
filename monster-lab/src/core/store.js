@@ -6,7 +6,8 @@ const defaults = () => ({
   currentId: null,
   monsters: [], // topic assistants: see monsters/registry.js
   labCreatures: [], // wandering counterparts in the laboratory
-  mode: 'lab', // 'lab' | 'monsters'
+  mode: 'lab', // 'lab' | 'monsters' | 'library'
+  libraryView: 'roam', // 'roam' | 'cards'
   selectedMonster: null,
   settings: { threshold: 8, sound: false },
 });
@@ -22,7 +23,8 @@ function load() {
       currentId: data.currentId ?? null,
       monsters: Array.isArray(data.monsters) ? data.monsters : [],
       labCreatures: Array.isArray(data.labCreatures) ? data.labCreatures : [],
-      mode: data.mode === 'monsters' ? 'monsters' : 'lab',
+      mode: ['monsters', 'library'].includes(data.mode) ? data.mode : 'lab',
+      libraryView: data.libraryView === 'cards' ? 'cards' : 'roam',
       selectedMonster: data.selectedMonster ?? null,
       deletedPresets: Array.isArray(data.deletedPresets) ? data.deletedPresets : [],
       // Sound always starts muted, regardless of the last session.

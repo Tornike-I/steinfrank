@@ -35,7 +35,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 export class ChatUI {
   constructor() {
     this.el = {
-      app: $('#app'), main: $('#main'), list: $('#conv-list'), labTab: $('#lab-tab'), thread: $('#thread'), messages: $('#messages'),
+      app: $('#app'), main: $('#main'), list: $('#conv-list'), labTab: $('#lab-tab'), libraryTab: $('#library-tab'), thread: $('#thread'), messages: $('#messages'),
       form: $('#composer'), input: $('#prompt'), send: $('#send'), mic: $('#mic'), greeting: $('#greeting'), ideas: $('#ideas'), banner: $('#topic-banner'),
       toggleSide: $('#toggle-sidebar'), toggleSide2: $('#toggle-sidebar-2'),
       sound: $('#sound'), settings: $('#settings'), pop: $('#settings-pop'), threshold: $('#threshold'),
@@ -48,8 +48,8 @@ export class ChatUI {
 
   get ctrl() { return state.mode === 'monsters' ? this.mon : this.lab; }
 
-  bind({ lab, mon, voice, onSound, onThreshold, getCount, onMode, thumbnail }) {
-    Object.assign(this, { lab, mon, voice, getCount, onMode, thumbnail });
+  bind({ lab, mon, voice, library, onSound, onThreshold, getCount, onMode, thumbnail }) {
+    Object.assign(this, { lab, mon, voice, library, getCount, onMode, thumbnail });
     const e = this.el;
     e.mic.innerHTML = ICON.mic;
     e.mic.addEventListener('click', async () => {
@@ -69,6 +69,8 @@ export class ChatUI {
     });
     e.input.addEventListener('input', () => { this._autosize(); this.renderControls(); });
     e.labTab.addEventListener('click', () => this.setMode('lab'));
+    e.libraryTab.addEventListener('click', () => this.setMode('library'));
+    e.libraryTab.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') this.setMode('library'); });
     const toggle = () => {
       e.app.classList.toggle('sidebar-collapsed');
       try { localStorage.setItem('stitchwick-lab.sidebar', e.app.classList.contains('sidebar-collapsed') ? '0' : '1'); } catch { /* ignore */ }
@@ -113,6 +115,7 @@ export class ChatUI {
     state.mode = mode;
     save();
     if (mode === 'monsters') { this.mon.den.setMonster(this.mon.def); this.mon.wf?.show(this.mon.def); }
+    if (mode === 'library') this.library?.show();
     this.onMode?.(mode);
     this.renderAll();
   }
@@ -142,9 +145,11 @@ export class ChatUI {
     const e = this.el;
     e.app.dataset.mode = state.mode;
     const def = this.mon.def;
-    const conv = lab ? null : this.mon.conv;
-    e.main.classList.toggle('is-empty', !lab && (!conv || conv.messages.length === 0));
-    if (lab) {
+    const conv = state.mode === 'monsters' ? this.mon.conv : null;
+    e.main.classList.toggle('is-empty', state.mode === 'monsters' && (!conv || conv.messages.length === 0));
+    if (state.mode === 'library') {
+      e.greeting.textContent = '';
+    } else if (lab) {
       e.greeting.textContent = this._greeting;
       e.input.placeholder = 'Describe a job for a new monster…';
       e.disclaimer.textContent = 'Every job gets its own monster. Dr. Frankenstein can make mistakes. Mostly on purpose.';
@@ -185,6 +190,7 @@ export class ChatUI {
   renderSidebar() {
     const e = this.el;
     e.labTab.classList.toggle('active', state.mode === 'lab');
+    e.libraryTab.classList.toggle('active', state.mode === 'library');
     const list = e.list;
     list.innerHTML = '';
     const mons = allMonsters();
@@ -230,7 +236,7 @@ export class ChatUI {
   }
 
   renderMessages() {
-    const conv = state.mode === 'lab' ? null : this.mon.conv;
+    const conv = state.mode === 'monsters' ? this.mon.conv : null;
     const box = this.el.messages;
     box.innerHTML = '';
     this.nodes.clear();
@@ -340,7 +346,7 @@ export class ChatUI {
     if (this._raf.has(m.id)) return;
     this._raf.set(m.id, requestAnimationFrame(() => {
       this._raf.delete(m.id);
-      const conv = state.mode === 'lab' ? null : this.mon.conv;
+      const conv = state.mode === 'monsters' ? this.mon.conv : null;
       if (!conv || !conv.messages.includes(m)) return;
       let row = this.nodes.get(m.id);
       if (!row) { row = this._node(m); this.el.messages.append(row); }
@@ -352,7 +358,7 @@ export class ChatUI {
 
   // Regenerate is only offered on the latest answer, when idle.
   _refreshActions() {
-    if (state.mode === 'lab') return;
+    if (state.mode !== 'monsters') return;
     const conv = this.mon?.conv;
     if (!conv) return;
     const last = conv.messages[conv.messages.length - 1];
@@ -409,6 +415,7 @@ export class ChatUI {
     e.thresholdVal.textContent = state.settings.threshold;
     e.count.textContent = `${this.getCount ? this.getCount() : 0} / ${state.settings.threshold}`;
     if (state.mode === 'lab') e.model.innerHTML = 'Frankenstein <em>Laboratory</em>';
+    else if (state.mode === 'library') e.model.innerHTML = 'Frankenstein <em>Library</em>';
     else {
       const d = this.mon.def;
       e.model.innerHTML = d ? `${esc(titleOf(d))} <em>${esc(d.name)}</em>` : '';

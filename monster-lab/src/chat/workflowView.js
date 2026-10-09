@@ -4,7 +4,7 @@
 import { limbKind, limbInfo } from '../monsters/limbParts.js';
 import { frankensteinSpec } from '../ai/assistants.js';
 
-const TOOL = {
+export const TOOL = {
   web_search: { icon: '🔭', tool: 'Web search · Tavily' },
   http_fetch: { icon: '🦾', tool: 'Page fetch · HTTP' },
   llm: { icon: '🧠', tool: 'LLM · OpenAI' },

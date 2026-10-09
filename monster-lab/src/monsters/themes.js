@@ -303,7 +303,8 @@ export function scoreTopics(text) {
   for (const th of Object.values(THEMES)) {
     let s = 0;
     for (const k of th.keywords) {
-      const re = new RegExp(`(^|\\s)${k.replace(/[%]/g, '\\%')}`, 'i');
+      // Whole words only (plurals allowed), so "sum" doesn't match "summarize".
+      const re = new RegExp(`(^|\\s)${k.replace(/[%]/g, '\\%')}(?:s|es)?(?=\\s)`, 'i');
       if (re.test(t)) s += k.length > 5 ? 2 : 1;
     }
     scores[th.id] = s;

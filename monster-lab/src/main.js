@@ -12,6 +12,8 @@ import { LabController } from './lab/labController.js';
 import * as F from './ai/frankenstein.js';
 import { MonsterController } from './chat/monsterController.js';
 import { WorkflowView } from './chat/workflowView.js';
+import { Menagerie } from './library/menagerie.js';
+import { LibraryView } from './library/libraryView.js';
 import { Den } from './den/den.js';
 import { monsterVoice } from './audio/monsterVoice.js';
 import { LiveVoice } from './ai/liveVoice.js';
@@ -81,12 +83,14 @@ const director = new Director({
 });
 
 const wf = new WorkflowView(document.getElementById('workflow'));
+const menagerie = new Menagerie();
 const mon = new MonsterController({ den, ui, wf });
 const voice = new LiveVoice({ mon, onChange: () => ui.renderControls() });
 mon.onSelect = (id) => { if (voice.state !== 'off' && voice.monsterId !== id) voice.stop(); };
 ctrl = new LabController({ director, creatures, ui, monsters: mon });
+const library = new LibraryView(document.getElementById('library'), { menagerie, open: (id) => ui.openMonster(id), thumbnail: (def) => thumbnail(def) });
 ui.bind({
-  lab: ctrl, mon, voice,
+  lab: ctrl, mon, voice, library,
   onSound: (on) => { sfx.setEnabled(on); if (!on) monsterVoice.stopAll(); },
   onThreshold: () => director.maybeCleanup(),
   getCount: () => creatures.count(),
@@ -144,6 +148,7 @@ window.addEventListener('resize', resize);
 resize();
 
 if (state.mode === 'monsters') { den.setMonster(mon.def); wf.show(mon.def); }
+if (state.mode === 'library') library.show();
 ctrl.init();
 // Restored monsters are on the floor: start on the view that shows them.
 director._shot(director._idleShot(), { cut: true });
@@ -161,6 +166,17 @@ document.addEventListener('pointermove', (ev) => {
   const hit = overMargin(ev) && creatures.pick(ev.clientX, ev.clientY, stageRect());
   mainEl.classList.toggle('over-monster', !!hit);
 });
+const overHall = (ev) => state.mode === 'library' && state.libraryView === 'roam' && !!ev.target.closest && !ev.target.closest('button, a, #sidebar, #topbar, .lib-bar');
+document.addEventListener('pointermove', (ev) => {
+  const def = overHall(ev) ? menagerie.pick(ev.clientX, ev.clientY, stageRect()) : null;
+  menagerie.setHover(def?.id || null);
+  if (state.mode === 'library') mainEl.classList.toggle('over-monster', !!def);
+});
+document.addEventListener('click', (ev) => {
+  if (!overHall(ev)) return;
+  const def = menagerie.pick(ev.clientX, ev.clientY, stageRect());
+  if (def) { sfx.play('squeak'); ui.openMonster(def.id); }
+});
 document.addEventListener('click', (ev) => {
   if (!overMargin(ev)) return;
   const c = creatures.pick(ev.clientX, ev.clientY, stageRect());
@@ -171,7 +187,7 @@ document.addEventListener('click', (ev) => {
 });
 
 // Debug handle for poking at things from the console.
-window.lab = { lab, creatures, director, ctrl, mon, den, overlay, renderer, ui, debugStage: (on = true) => document.body.classList.toggle('debug-stage', on) };
+window.lab = { state, lab, creatures, director, ctrl, mon, den, menagerie, library, overlay, renderer, ui, debugStage: (on = true) => document.body.classList.toggle('debug-stage', on) };
 if (new URLSearchParams(location.search).get('debug') === 'stage') window.lab.debugStage(true);
 
 const timer = new THREE.Timer();
@@ -225,7 +241,13 @@ function step(now) {
   lab.rig.update(dt);
   creatures.update(dt);
   overlay.update(dt);
-  if (!inLab) {
+  const inLibrary = state.mode === 'library';
+  if (inLibrary) {
+    menagerie.camera.aspect = aspect;
+    menagerie.camera.updateProjectionMatrix();
+    menagerie.update(dt);
+    menagerie.rig.update(dt);
+  } else if (!inLab) {
     den.camera.aspect = aspect;
     // Shift the picture up so the monster's head and shoulders sit above the
     // floating chat panel, which covers its lower body.
@@ -243,6 +265,7 @@ function step(now) {
     renderer.setViewport(r.x, y, r.w, r.h);
     renderer.setScissor(r.x, y, r.w, r.h);
     if (inLab) renderer.render(lab.scene, lab.camera);
+    else if (inLibrary) renderer.render(menagerie.scene, menagerie.camera);
     else renderer.render(den.scene, den.camera);
   }
 }
