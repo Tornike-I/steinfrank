@@ -1,0 +1,594 @@
+{
+  "id": "weather-assistant",
+  "name": "Weather Assistant",
+  "version": 1,
+  "purpose": "Answer weather questions and outlook requests for a city with a short spoken verdict and a detailed report.",
+  "persona": "A calm, sturdy guide that gives plain weather answers.",
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "question": {
+        "type": "string",
+        "description": "The user's weather question or request.",
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "question"
+    ]
+  },
+  "policy": {
+    "allowed_domains": [
+      "open-meteo.com",
+      "api.open-meteo.com",
+      "geocoding-api.open-meteo.com"
+    ],
+    "max_credits": 0,
+    "max_llm_tokens": 1700,
+    "max_steps": 9,
+    "max_images": 0,
+    "max_tts_chars": 900,
+    "max_notifications": 0
+  },
+  "steps": [
+    {
+      "id": "parse",
+      "limb": "llm",
+      "args": {
+        "prompt": "Normalize the user's weather request into JSON with fields: intent (one of: city_outlook, rain_check, other_weather, out_of_scope), city (string or empty), days (integer 1-7 or null), units (use 'auto'), and a brief note. Only use the weather topic. If the request is not about weather, set intent to out_of_scope. If the user asks whether it will rain, set intent to rain_check. User request: {{inputs.question}}",
+        "max_tokens": 120,
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "intent": {
+              "type": "string"
+            },
+            "city": {
+              "type": "string"
+            },
+            "days": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "units": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "intent",
+            "city",
+            "days",
+            "units",
+            "note"
+          ]
+        }
+      },
+      "note": "Turn free-form weather questions into exact fields for source URLs."
+    },
+    {
+      "id": "normalize",
+      "limb": "forged:normalize_weather_query",
+      "args": {
+        "question": "{{inputs.question}}",
+        "intent": "{{steps.parse.intent}}",
+        "city": "{{steps.parse.city}}",
+        "days": "{{steps.parse.days}}",
+        "units": "{{steps.parse.units}}"
+      },
+      "note": "Clean the query and prepare API-safe fields."
+    },
+    {
+      "id": "gather",
+      "args": {},
+      "parallel": [
+        {
+          "id": "geo",
+          "limb": "http_fetch",
+          "args": {
+            "url": "https://geocoding-api.open-meteo.com/v1/search?name={{steps.normalize.city_query}}&count=1",
+            "max_chars": 4000
+          },
+          "when": "steps.normalize.intent != 'out_of_scope' and steps.normalize.city_query != ''",
+          "note": "Look up the city coordinates."
+        },
+        {
+          "id": "search",
+          "limb": "web_search",
+          "args": {
+            "query": "weather forecast {{steps.normalize.city_query}} rain tomorrow",
+            "max_results": 5
+          },
+          "when": "steps.normalize.intent != 'out_of_scope' and steps.normalize.city_query != ''",
+          "note": "Backup source search for weather context."
+        }
+      ],
+      "note": "Fetch weather sources in parallel."
+    },
+    {
+      "id": "extract",
+      "limb": "forged:extract_weather_facts",
+      "args": {
+        "intent": "{{steps.normalize.intent}}",
+        "city_query": "{{steps.normalize.city_query}}",
+        "geo_json": "{{steps.gather.geo.json}}",
+        "geo_status": "{{steps.gather.geo.status}}",
+        "search_results": "{{steps.gather.search.results}}",
+        "question": "{{inputs.question}}"
+      },
+      "note": "Pull out the city coordinates and basic source facts."
+    },
+    {
+      "id": "forecast",
+      "limb": "http_fetch",
+      "args": {
+        "url": "https://api.open-meteo.com/v1/forecast?latitude={{steps.extract.latitude}}&longitude={{steps.extract.longitude}}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto",
+        "max_chars": 6000
+      },
+      "when": "steps.extract.ok == true",
+      "note": "Fetch the actual forecast for the resolved city."
+    },
+    {
+      "id": "verify",
+      "limb": "forged:verify_weather_data",
+      "args": {
+        "intent": "{{steps.normalize.intent}}",
+        "city_query": "{{steps.normalize.city_query}}",
+        "geo_status": "{{steps.gather.geo.status}}",
+        "geo_json": "{{steps.gather.geo.json}}",
+        "forecast_status": "{{steps.forecast.status}}",
+        "forecast_json": "{{steps.forecast.json}}"
+      },
+      "note": "Ensure the essential weather data really arrived."
+    },
+    {
+      "id": "judge",
+      "limb": "forged:judge_weather_answer",
+      "args": {
+        "intent": "{{steps.normalize.intent}}",
+        "ok": "{{steps.verify.ok}}",
+        "problems": "{{steps.verify.problems}}",
+        "city": "{{steps.normalize.city_query}}",
+        "extract": "{{steps.extract}}",
+        "forecast_json": "{{steps.forecast.json}}",
+        "question": "{{inputs.question}}"
+      },
+      "note": "Apply a fixed weather rubric and assemble the answer facts."
+    },
+    {
+      "id": "compose",
+      "limb": "forged:compose_weather_response",
+      "args": {
+        "intent": "{{steps.normalize.intent}}",
+        "ok": "{{steps.verify.ok}}",
+        "problems": "{{steps.verify.problems}}",
+        "judge": "{{steps.judge}}",
+        "city": "{{steps.normalize.city_query}}",
+        "question": "{{inputs.question}}"
+      },
+      "note": "Write the spoken verdict and markdown report."
+    }
+  ],
+  "output": {
+    "speech": "{{steps.compose.speech}}",
+    "report": "{{steps.compose.report}}"
+  },
+  "speak": true,
+  "forged_limbs": [
+    {
+      "name": "normalize_weather_query",
+      "description": "Normalize the weather request and make a safe city query string.",
+      "code": "def run(question, intent, city, days, units):\n    q = (question or '').strip().lower()\n    city_q = (city or '').strip()\n    if intent not in ('city_outlook', 'rain_check'):\n        return {'intent': intent or 'out_of_scope', 'city_query': '', 'days': days, 'units': units or 'auto'}\n    city_q = ' '.join(city_q.split())\n    return {'intent': intent, 'city_query': city_q, 'days': days if isinstance(days, int) else None, 'units': 'auto'}\n",
+      "tests": [
+        {
+          "args": {
+            "question": "Weather in Prague tomorrow",
+            "intent": "city_outlook",
+            "city": "Prague",
+            "days": 1,
+            "units": "auto"
+          },
+          "expect": {
+            "intent": "city_outlook",
+            "city_query": "Prague",
+            "days": 1,
+            "units": "auto"
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "question": "Will it rain in Brno tomorrow?",
+            "intent": "rain_check",
+            "city": "Brno",
+            "days": 1,
+            "units": "auto"
+          },
+          "expect": {
+            "intent": "rain_check",
+            "city_query": "Brno",
+            "days": 1,
+            "units": "auto"
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "question": "Hello",
+            "intent": "out_of_scope",
+            "city": "",
+            "days": null,
+            "units": "auto"
+          },
+          "expect": {
+            "intent": "out_of_scope",
+            "city_query": "",
+            "units": "auto"
+          },
+          "contains": {}
+        }
+      ]
+    },
+    {
+      "name": "extract_weather_facts",
+      "description": "Extract city coordinates and source facts from geocoding and search results.",
+      "code": "def run(intent, city_query, geo_json, geo_status, search_results, question):\n    lat = None\n    lon = None\n    name = city_query or ''\n    country = ''\n    admin1 = ''\n    ok = False\n    if intent in ('city_outlook', 'rain_check') and isinstance(geo_json, dict):\n        results = geo_json.get('results') or []\n        if results:\n            top = results[0] or {}\n            lat = top.get('latitude')\n            lon = top.get('longitude')\n            name = top.get('name') or name\n            country = top.get('country') or ''\n            admin1 = top.get('admin1') or ''\n            ok = lat is not None and lon is not None\n    return {'ok': ok, 'latitude': lat, 'longitude': lon, 'city_name': name, 'country': country, 'admin1': admin1, 'search_hits': len(search_results or [])}\n",
+      "tests": [
+        {
+          "args": {
+            "intent": "city_outlook",
+            "city_query": "Prague",
+            "geo_json": {
+              "results": [
+                {
+                  "latitude": 50.08,
+                  "longitude": 14.44,
+                  "name": "Prague",
+                  "country": "Czechia",
+                  "admin1": "Prague"
+                }
+              ]
+            },
+            "geo_status": 200,
+            "search_results": [
+              {
+                "title": "x",
+                "url": "u",
+                "content": "y"
+              }
+            ],
+            "question": "Weather in Prague"
+          },
+          "expect": {
+            "ok": true,
+            "latitude": 50.08,
+            "longitude": 14.44,
+            "city_name": "Prague",
+            "country": "Czechia",
+            "admin1": "Prague",
+            "search_hits": 1
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "intent": "out_of_scope",
+            "city_query": "",
+            "geo_json": null,
+            "geo_status": 200,
+            "search_results": [],
+            "question": "Hi"
+          },
+          "expect": {
+            "ok": false,
+            "latitude": null,
+            "longitude": null,
+            "search_hits": 0
+          },
+          "contains": {}
+        }
+      ]
+    },
+    {
+      "name": "verify_weather_data",
+      "description": "Check that the needed weather inputs and forecast data arrived and are sane.",
+      "code": "def run(intent, city_query, geo_status, geo_json, forecast_status, forecast_json):\n    problems = []\n    ok = True\n    if intent not in ('city_outlook', 'rain_check'):\n        return {'ok': True, 'problems': []}\n    if not city_query:\n        ok = False\n        problems.append('missing city')\n    if geo_status != 200 or not isinstance(geo_json, dict) or not (geo_json.get('results') or []):\n        ok = False\n        problems.append('could not resolve city')\n    if forecast_status != 200 or not isinstance(forecast_json, dict):\n        ok = False\n        problems.append('could not fetch forecast')\n    daily = (forecast_json or {}).get('daily') if isinstance(forecast_json, dict) else None\n    if intent in ('city_outlook', 'rain_check') and ok and not daily:\n        ok = False\n        problems.append('forecast missing daily data')\n    return {'ok': ok, 'problems': problems}\n",
+      "tests": [
+        {
+          "args": {
+            "intent": "city_outlook",
+            "city_query": "Prague",
+            "geo_status": 200,
+            "geo_json": {
+              "results": [
+                1
+              ]
+            },
+            "forecast_status": 200,
+            "forecast_json": {
+              "daily": {
+                "time": [
+                  1
+                ]
+              }
+            }
+          },
+          "expect": {
+            "ok": true,
+            "problems": []
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "intent": "city_outlook",
+            "city_query": "",
+            "geo_status": 404,
+            "geo_json": null,
+            "forecast_status": 0,
+            "forecast_json": null
+          },
+          "expect": {
+            "ok": false,
+            "problems": [
+              "missing city",
+              "could not resolve city",
+              "could not fetch forecast"
+            ]
+          },
+          "contains": {}
+        }
+      ]
+    },
+    {
+      "name": "judge_weather_answer",
+      "description": "Convert verified facts into a concise weather verdict and supporting details.",
+      "code": "def run(intent, ok, problems, city, extract, forecast_json, question):\n    if intent not in ('city_outlook', 'rain_check'):\n        return {'score': 0, 'verdict': 'out_of_scope', 'reasons': ['Request is not weather-related.'], 'highlights': [], 'city': city, 'temps': [], 'precip': [], 'current': {}, 'escalate': False, 'rain_verdict': ''}\n    if not ok:\n        return {'score': 0, 'verdict': 'missing_data', 'reasons': problems or ['Weather data unavailable.'], 'highlights': [], 'city': city, 'temps': [], 'precip': [], 'current': {}, 'escalate': False, 'rain_verdict': ''}\n    daily = forecast_json.get('daily') or {}\n    current = forecast_json.get('current') or {}\n    temps = []\n    precip = []\n    times = daily.get('time') or []\n    tmax = daily.get('temperature_2m_max') or []\n    tmin = daily.get('temperature_2m_min') or []\n    pmax = daily.get('precipitation_probability_max') or []\n    for i in range(min(len(times), 3)):\n        temps.append({'date': times[i], 'high': tmax[i] if i < len(tmax) else None, 'low': tmin[i] if i < len(tmin) else None})\n        precip.append(pmax[i] if i < len(pmax) else None)\n    score = 0\n    reasons = []\n    if temps:\n        score += 1\n        reasons.append('Daily forecast available.')\n    if current:\n        score += 1\n        reasons.append('Current conditions available.')\n    rain_verdict = ''\n    if intent == 'rain_check':\n        p0 = precip[0] if precip else None\n        if p0 is None:\n            rain_verdict = 'unclear'\n        elif p0 >= 50:\n            rain_verdict = 'yes'\n        elif p0 <= 20:\n            rain_verdict = 'unlikely'\n        else:\n            rain_verdict = 'possible'\n    return {'score': score, 'verdict': 'weather_ready', 'reasons': reasons, 'highlights': temps, 'city': city, 'temps': temps, 'precip': precip, 'current': current, 'escalate': False, 'rain_verdict': rain_verdict}\n",
+      "tests": [
+        {
+          "args": {
+            "intent": "city_outlook",
+            "ok": true,
+            "problems": [],
+            "city": "Prague",
+            "extract": {
+              "latitude": 50.08
+            },
+            "forecast_json": {
+              "current": {
+                "temperature_2m": 12
+              },
+              "daily": {
+                "time": [
+                  "2026-01-01"
+                ],
+                "temperature_2m_max": [
+                  15
+                ],
+                "temperature_2m_min": [
+                  7
+                ],
+                "precipitation_probability_max": [
+                  20
+                ]
+              }
+            },
+            "question": "Weather in Prague"
+          },
+          "expect": {
+            "score": 2,
+            "verdict": "weather_ready",
+            "escalate": false,
+            "rain_verdict": ""
+          },
+          "contains": {
+            "reasons": [
+              "Daily forecast",
+              "Current conditions"
+            ]
+          }
+        },
+        {
+          "args": {
+            "intent": "rain_check",
+            "ok": true,
+            "problems": [],
+            "city": "Brno",
+            "extract": {
+              "latitude": 49.19
+            },
+            "forecast_json": {
+              "current": {
+                "temperature_2m": 12
+              },
+              "daily": {
+                "time": [
+                  "2026-01-01"
+                ],
+                "temperature_2m_max": [
+                  15
+                ],
+                "temperature_2m_min": [
+                  7
+                ],
+                "precipitation_probability_max": [
+                  70
+                ]
+              }
+            },
+            "question": "Will it rain in Brno tomorrow?"
+          },
+          "expect": {
+            "score": 2,
+            "verdict": "weather_ready",
+            "escalate": false,
+            "rain_verdict": "yes"
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "intent": "out_of_scope",
+            "ok": true,
+            "problems": [],
+            "city": "",
+            "extract": {},
+            "forecast_json": {},
+            "question": "Write a poem"
+          },
+          "expect": {
+            "score": 0,
+            "verdict": "out_of_scope",
+            "escalate": false,
+            "rain_verdict": ""
+          },
+          "contains": {}
+        }
+      ]
+    },
+    {
+      "name": "compose_weather_response",
+      "description": "Compose spoken and written output for weather or refusal/out-of-scope cases.",
+      "code": "def run(intent, ok, problems, judge, city, question):\n    if intent not in ('city_outlook', 'rain_check'):\n        speech = 'I can help with weather questions only. Please ask about a city forecast, rain chance, or weather outlook.'\n        report = '# Weather Assistant\\n\\n**Status:** Out of scope\\n\\nI only answer weather-related requests.'\n        return {'speech': speech, 'report': report}\n    if not ok:\n        problem_text = '; '.join(problems or ['weather data unavailable'])\n        speech = f'I could not give a weather verdict for {city or \"that city\"} because {problem_text}.'\n        report = f'# Weather outlook for {city or \"unknown location\"}\\n\\n**Status:** Missing data\\n\\nProblems: {problem_text}'\n        return {'speech': speech, 'report': report}\n    current = judge.get('current') or {}\n    temps = judge.get('temps') or []\n    precip = judge.get('precip') or []\n    parts = []\n    for item in temps[:3]:\n        if item and item.get('date'):\n            hi = item.get('high')\n            lo = item.get('low')\n            parts.append(f\"{item['date']}: {lo} to {hi}°\")\n    p0 = precip[0] if precip else None\n    if intent == 'rain_check':\n        if judge.get('rain_verdict') == 'yes':\n            rain_line = f\"Yes — rain is likely in {city} tomorrow, with about {p0}% chance.\"\n        elif judge.get('rain_verdict') == 'unlikely':\n            rain_line = f\"No — rain looks unlikely in {city} tomorrow, with about {p0}% chance.\"\n        elif judge.get('rain_verdict') == 'possible':\n            rain_line = f\"Rain is possible in {city} tomorrow, with about {p0}% chance.\"\n        else:\n            rain_line = f\"I can't say clearly whether it will rain in {city} tomorrow because the rain chance is missing.\"\n        temp_now = current.get('temperature_2m')\n        speech = rain_line\n        if temp_now is not None:\n            speech += f\" Current temperature is about {temp_now}°.\"\n        report = f\"# Weather outlook for {city}\\n\\n**Verdict:** {judge.get('rain_verdict') or 'unclear'}\\n\\n## Rain check\\n- Tomorrow rain chance: {p0 if p0 is not None else 'n/a'}%\\n\\n## Current\\n- Temperature: {temp_now if temp_now is not None else 'n/a'}\\n\\n## Outlook\\n\" + '\\n'.join([f\"- {p}\" for p in parts])\n        return {'speech': speech[:900], 'report': report}\n    ptxt = ''\n    if precip:\n        ptxt = f\"Rain chances: {', '.join(str(x) for x in precip[:3] if x is not None)}%.\"\n    temp_now = current.get('temperature_2m')\n    speech = f\"The weather outlook for {city} is ready. Right now it is about {temp_now}° if current data is available, and the next days are: {' '.join(parts)} {ptxt}\".strip()\n    report = f\"# Weather outlook for {city}\\n\\n**Verdict:** Weather ready\\n\\n## Current\\n- Temperature: {temp_now if temp_now is not None else 'n/a'}\\n\\n## Outlook\\n\" + '\\n'.join([f\"- {p}\" for p in parts])\n    if ptxt:\n        report += f\"\\n- {ptxt}\"\n    return {'speech': speech[:900], 'report': report}\n",
+      "tests": [
+        {
+          "args": {
+            "intent": "city_outlook",
+            "ok": true,
+            "problems": [],
+            "judge": {
+              "current": {
+                "temperature_2m": 12
+              },
+              "temps": [
+                {
+                  "date": "2026-01-01",
+                  "high": 15,
+                  "low": 7
+                }
+              ],
+              "precip": [
+                20
+              ]
+            },
+            "city": "Prague",
+            "question": "Weather in Prague"
+          },
+          "expect": {
+            "speech": "The weather outlook for Prague is ready. Right now it is about 12° if current data is available, and the next days are: 2026-01-01: 7 to 15° Rain chances: 20%."
+          },
+          "contains": {
+            "report": [
+              "# Weather outlook for Prague",
+              "Verdict",
+              "Current",
+              "Outlook"
+            ]
+          }
+        },
+        {
+          "args": {
+            "intent": "rain_check",
+            "ok": true,
+            "problems": [],
+            "judge": {
+              "current": {
+                "temperature_2m": 7
+              },
+              "temps": [
+                {
+                  "date": "2026-01-01",
+                  "high": 9,
+                  "low": 3
+                }
+              ],
+              "precip": [
+                70
+              ],
+              "rain_verdict": "yes"
+            },
+            "city": "Brno",
+            "question": "Will it rain in Brno tomorrow?"
+          },
+          "expect": {
+            "speech": "Yes — rain is likely in Brno tomorrow, with about 70% chance. Current temperature is about 7°."
+          },
+          "contains": {
+            "report": [
+              "Rain check",
+              "Tomorrow rain chance",
+              "Verdict",
+              "yes"
+            ]
+          }
+        },
+        {
+          "args": {
+            "intent": "out_of_scope",
+            "ok": true,
+            "problems": [],
+            "judge": {},
+            "city": "",
+            "question": "Make a logo"
+          },
+          "expect": {
+            "speech": "I can help with weather questions only. Please ask about a city forecast, rain chance, or weather outlook."
+          },
+          "contains": {
+            "report": [
+              "Out of scope"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "examples": [
+    {
+      "question": "What is the weather outlook for Prague for the next 3 days?"
+    },
+    {
+      "question": "Will it rain in Brno tomorrow?"
+    }
+  ],
+  "estimate": {
+    "min": {
+      "llm_tokens": 1248,
+      "credits": 0.0,
+      "seconds": 7.0,
+      "images": 0,
+      "tts_chars": 100,
+      "usd": 0.010266
+    },
+    "max": {
+      "llm_tokens": 1248,
+      "credits": 0.0,
+      "seconds": 11.0,
+      "images": 0,
+      "tts_chars": 900,
+      "usd": 0.098266
+    }
+  },
+  "safety": {
+    "verdict": "allow",
+    "notes": "A recurring weather assistant that answers weather questions and generates spoken and markdown outputs is a benign productivity task."
+  },
+  "voice": {
+    "elevenlabs_agent_id": "agent_7701m4f80xg6eemvghbwcqptp6aj",
+    "first_message": "I’m ready. Ask me about the weather in a city, and I’ll give you the outlook.",
+    "archetype": "golem",
+    "language": "en",
+    "cast": [],
+    "voice_id": "uDilYhhlpAMdem496v2U",
+    "sounds": {
+      "arrive": "/artifacts/monsters/weather-assistant/v1/arrive.mp3",
+      "working": "/artifacts/monsters/weather-assistant/v1/working.mp3",
+      "done": "/artifacts/monsters/weather-assistant/v1/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/weather-assistant/v1/birth.mp3"
+  }
+}

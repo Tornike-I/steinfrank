@@ -13,6 +13,10 @@ class BudgetExceeded(LimbError):
     pass
 
 
+class TransientLimbError(LimbError):
+    """A failure worth retrying (e.g. HTTP 503 or 429 from an overloaded service)."""
+
+
 @dataclass
 class Cost:
     llm_tokens: int = 0

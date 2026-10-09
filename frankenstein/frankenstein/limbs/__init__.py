@@ -1,5 +1,5 @@
 from ..spec import MonsterSpec
-from .base import BudgetExceeded, Cost, Limb, LimbError, NeedsInput, Pending, RunContext
+from .base import BudgetExceeded, Cost, Limb, LimbError, NeedsInput, Pending, RunContext, TransientLimbError
 from .forged import ForgedLimbRunner
 from .http_fetch import HttpFetchLimb
 from .llm import LlmLimb

@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from .. import config
-from .base import Limb, LimbError
+from .base import Limb, LimbError, TransientLimbError
 
 MAX_BYTES = 2_000_000
 MAX_REDIRECTS = 3
@@ -133,7 +133,7 @@ class HttpFetchLimb(Limb):
                 raise LimbError("too many redirects")
 
         if status >= 400:
-            raise LimbError(f"GET {url} -> HTTP {status}")
+            raise (TransientLimbError if status == 429 or status >= 500 else LimbError)(f"GET {url} -> HTTP {status}")
         raw = body.decode(encoding, errors="replace")
         out = {"status": status, "url": url, "title": "", "text": "", "json": None, "error": None}
         if "json" in ctype:

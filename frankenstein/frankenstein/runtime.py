@@ -9,7 +9,7 @@ import openai
 
 from . import channels, config, safety, speech as speech_mod, store
 from .forge.estimator import estimate
-from .limbs import REGISTRY, BudgetExceeded, Cost, LimbError, NeedsInput, Pending, RunContext, dry_run_limb, get_limb
+from .limbs import REGISTRY, BudgetExceeded, Cost, LimbError, NeedsInput, Pending, RunContext, TransientLimbError, dry_run_limb, get_limb
 from .refs import eval_when, lookup, render
 from .spec import MonsterSpec, Step
 
@@ -17,7 +17,7 @@ log = logging.getLogger("frankenstein.runtime")
 
 DEFAULT_MAX_STRING = 4000
 JSON_TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "array": list, "object": dict}
-TRANSIENT = (httpx.TransportError, openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)
+TRANSIENT = (httpx.TransportError, openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError, TransientLimbError)
 RETRY_DELAYS = (1, 3)
 
 
