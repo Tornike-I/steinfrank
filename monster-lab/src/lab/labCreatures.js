@@ -25,6 +25,32 @@ const ZONES = [
   { x0: 2.75, x1: 3.5, z0: -0.25, z1: 0.8, w: 0.5 }, // right corner
 ];
 
+// Floor stains stack in a fixed order, so they never flicker against each
+// other: scorch marks at the bottom, blood above, acid on top.
+const STAIN = { scorch: 0, blood: 1, acid: 2 };
+
+// Soft-edged round stain (alpha falls off toward the rim, with a ragged edge).
+const stainAlpha = (() => {
+  const n = 128, cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+  grad.addColorStop(0, '#fff');
+  grad.addColorStop(0.62, '#eee');
+  grad.addColorStop(0.85, '#555');
+  grad.addColorStop(1, '#000');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, n, n);
+  g.fillStyle = '#000';
+  for (let i = 0; i < 26; i++) {
+    const a = (i / 26) * Math.PI * 2, r = n * (0.44 + Math.random() * 0.06);
+    g.beginPath();
+    g.arc(n / 2 + Math.cos(a) * r, n / 2 + Math.sin(a) * r, n * (0.04 + Math.random() * 0.05), 0, Math.PI * 2);
+    g.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+})();
+
 const blobGeo = (() => {
   const g = new THREE.CircleGeometry(1, 18);
   g.rotateX(-Math.PI / 2);
@@ -256,7 +282,7 @@ export class LabCreatures {
     c.tilt.position.y = c.m.width * 0.42;
     for (const f of c.flies) c.group.remove(f.mesh);
     c.flies = [];
-    c.pool = this._decal(c.pos.clone(), c.m.height * 0.45, 0x4a0306, instant ? 1 : 0.1);
+    c.pool = this._decal(c.pos.clone(), c.m.height * 0.45, 0x5a0507, instant ? 1 : 0.1, 'blood');
     for (let i = 0; i < 2; i++) {
       const f = new THREE.Mesh(new THREE.SphereGeometry(0.008, 5, 4), new THREE.MeshBasicMaterial({ color: 0x0a0a0a }));
       c.group.add(f);
@@ -268,6 +294,7 @@ export class LabCreatures {
   _remove(c) {
     this.scene.remove(c.group);
     if (c.label) { c.label.material.map.dispose(); c.label.material.dispose(); }
+    for (const b of c.goo || []) { b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
     disposeMonster(c.m);
     this.creatures.delete(c.id);
   }
@@ -284,7 +311,7 @@ export class LabCreatures {
     const list = [...this.creatures.values()].filter((c) => c.state !== 'dissolving').sort((a, b) => a.pos.distanceTo(at) - b.pos.distanceTo(at));
     this.fx.fire(at.clone().setY(0.3), 70);
     this.fx.smoke(at.clone().setY(0.4), 18, 0x3a3630);
-    this._decal(at.clone(), 0.9, 0x120d08, 1);
+    this._decal(at.clone(), 0.55, 0x2e2620, 1, 'scorch'); // a soft sooty mark, not a black hole
     this._comic(at.clone().setY(1.3), 'KA-BLAM!', 1.1);
     list.forEach((c, i) => setTimeout(() => {
       if (!this.creatures.has(c.id)) return;
@@ -305,7 +332,7 @@ export class LabCreatures {
     c.fling = { v: V(away.x, 3.2 + Math.random() * 1.5, away.z), spin: V((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 12) };
     if (c.pool) { c.pool.fade = true; c.pool = null; }
     c.tilt.position.y = 0;
-    setPallor(c.m, 0.4, new THREE.Color(0x2a2018));
+    setPallor(c.m, 0.22, new THREE.Color(0x4a4038)); // singed, still recognisable
     setDeadEyes(c.m, true);
     if (c.label) c.label.visible = false;
   }
@@ -319,9 +346,35 @@ export class LabCreatures {
       if (c.state === 'flung') { c.pos.y = 0; this._makeCorpse(c, c.side || 1, true); }
       c.state = 'dissolving';
       c.dis = { t: 0 };
-      this._decal(c.pos.clone(), c.m.height * 0.6, 0x4aaa1a, 0.15);
+      this._acidOnBody(c);
+      this._decal(c.pos.clone(), c.m.height * 0.6, 0x6acc2a, 0.15, 'acid');
     }, 400 + i * 110));
     return wait(400 + list.length * 110 + 1900);
+  }
+
+  // Acid lands on the corpse itself: glossy goo blobs placed on the body's
+  // actual upper surface (raycast from above), melting along with it.
+  _acidOnBody(c) {
+    c.group.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(c.tilt);
+    const ray = new THREE.Raycaster();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x8aff3a, emissive: 0x3aa010, emissiveIntensity: 0.6, roughness: 0.08, transparent: true, opacity: 0.85 });
+    c.goo = [];
+    for (let i = 0; i < 16 && c.goo.length < 9; i++) {
+      const x = box.min.x + Math.random() * (box.max.x - box.min.x);
+      const z = box.min.z + Math.random() * (box.max.z - box.min.z);
+      ray.set(V(x, box.max.y + 0.5, z), V(0, -1, 0));
+      const hit = ray.intersectObject(c.m.root, true)[0];
+      if (!hit) continue;
+      const r = 0.035 + Math.random() * 0.05;
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), mat);
+      blob.position.copy(c.group.worldToLocal(hit.point.clone()));
+      blob.scale.setScalar(0.001);
+      c.group.add(blob);
+      c.goo.push({ mesh: blob, r, ph: Math.random() * 6 });
+    }
+    // A few drips running down off the body.
+    for (let i = 0; i < 4; i++) this.fx.goo(V(c.pos.x + (Math.random() - 0.5) * 0.3, box.max.y, c.pos.z + (Math.random() - 0.5) * 0.3), 4, 0.4);
   }
 
   // The hose jet lands at `p`: stains (and anything left over) within r wash away.
@@ -353,10 +406,17 @@ export class LabCreatures {
   }
 
   // ------------------------------------------------------------- decals
-  _decal(pos, r, color, startScale = 1) {
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.2, transparent: true, opacity: 0.92, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  _decal(pos, r, color, startScale = 1, kind = 'blood') {
+    const layer = STAIN[kind] ?? 1;
+    const acid = kind === 'acid';
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: acid ? 0.12 : 0.25, transparent: true, opacity: kind === 'scorch' ? 0.62 : acid ? 0.8 : 0.9,
+      alphaMap: stainAlpha, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 - layer * 2, polygonOffsetUnits: -2 - layer * 2,
+      emissive: acid ? 0x2a6a08 : 0x000000, emissiveIntensity: acid ? 0.5 : 0,
+    });
     const m = new THREE.Mesh(blobGeo, mat);
-    const d = { mesh: m, pos: pos.clone().setY(0.004 + Math.random() * 0.002), r, s: startScale, fade: false, sx: 0.8 + Math.random() * 0.4 };
+    m.renderOrder = 1 + layer; // fixed draw order: scorch, then blood, then acid
+    const d = { mesh: m, pos: pos.clone().setY(0.003 + layer * 0.0015), r, s: startScale, fade: false, sx: 0.8 + Math.random() * 0.4, kind };
     m.position.copy(d.pos);
     m.scale.set(r * d.s * d.sx, 1, r * d.s);
     m.receiveShadow = true;
@@ -398,7 +458,7 @@ export class LabCreatures {
     const hop = c.state === 'alive' ? hopHeight(c.m, c.phase, c.walk) : 0;
     c.group.position.set(c.pos.x, c.pos.y + hop, c.pos.z);
     c.group.rotation.y = c.yaw;
-    c.blob.visible = c.state !== 'flung';
+    c.blob.visible = c.state === 'alive' || c.state === 'arriving' || c.state === 'summoned' || c.state === 'returning';
     c.blob.position.y = 0.006 - c.pos.y - hop;
     if (c.label) {
       c.label.visible = c.state === 'alive' || c.state === 'returning';
@@ -528,9 +588,16 @@ export class LabCreatures {
       k.t += dt;
       const u = Math.min(1, k.t / 1.7);
       setPallor(m, Math.min(1, u * 1.5), ACID);
-      c.tilt.scale.set(1 + u * 0.35, Math.max(0.05, 1 - u), 1 + u * 0.35);
+      // Melt down into the puddle: squash in world-vertical (the group isn't
+      // rotated onto its side like the tilt is), spreading a little.
+      const melt = u * u * (3 - 2 * u);
+      c.group.scale.set(1 + melt * 0.25, Math.max(0.04, 1 - melt), 1 + melt * 0.25);
       for (const f of c.flies) f.mesh.visible = false;
-      if (Math.random() < 0.6) this.fx.goo(c.pos.clone().setY(0.1), 2, 0.3);
+      for (const b of c.goo || []) {
+        const grow = Math.min(1, k.t / 0.25);
+        b.mesh.scale.setScalar(b.r * grow * (1 + Math.sin(k.t * 9 + b.ph) * 0.06));
+      }
+      if (Math.random() < 0.5) this.fx.goo(c.pos.clone().setY(0.12 * (1 - melt) + 0.03), 2, 0.25);
       if (u >= 1) this._remove(c);
     }
   }
