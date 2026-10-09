@@ -280,3 +280,31 @@ def test_sokosumi_payment_pending_with_result_counts_as_done(monkeypatch):
     from frankenstein.limbs import RunContext
     out = asyncio.run(SokosumiLimb().poll({"job_id": "j1", "agent_id": "x"}, RunContext("r", "a", spec)))
     assert isinstance(out, dict) and out["result"] == "**Done**"
+
+
+def test_sokosumi_identical_hire_reuses_result(monkeypatch):
+    from frankenstein import sokosumi
+    from frankenstein.limbs import RunContext
+    from frankenstein.limbs.sokosumi_job import SokosumiLimb
+
+    created = []
+
+    async def fake_create(agent_id, inputs, cap, name=None):
+        created.append(agent_id)
+        return {"id": "job-1"}
+
+    async def fake_get_job(job_id):
+        return {"id": job_id, "status": "completed", "credits": 60, "result": "report", "completedAt": "x"}
+
+    async def no_files(job_id):
+        return []
+
+    monkeypatch.setattr(sokosumi, "create_job", fake_create)
+    monkeypatch.setattr(sokosumi, "get_job", fake_get_job)
+    monkeypatch.setattr(sokosumi, "get_files", no_files)
+    spec = make([{"id": "a", "limb": "echo", "args": {}}], policy={"max_credits": 500})
+    limb, args = SokosumiLimb(), {"agent_id": "agent-x", "inputs": {"url": "u1"}, "max_credits": 60}
+    first = asyncio.run(limb.run(args, RunContext("r1", "a", spec)))
+    asyncio.run(limb.poll(first.state, RunContext("r1", "a", spec)))
+    again = asyncio.run(limb.run(args, RunContext("r2", "a", spec)))
+    assert created == ["agent-x"] and again["result"] == "report" and again["reused"] and again["credits"] == 0

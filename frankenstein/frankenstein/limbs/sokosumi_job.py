@@ -1,9 +1,17 @@
+import hashlib
+import json
 import time
 
 from .. import config, pricing, sokosumi, store
 from .base import Cost, Limb, LimbError, NeedsInput, Pending
 
 FAILED = {"failed", "payment_failed", "refund_resolved", "dispute_resolved"}
+# A re-run with the same inputs reuses a delivered result instead of paying for the same job again.
+REUSE_SECONDS = 86400
+
+
+def _reuse_key(agent_id: str, inputs: dict) -> str:
+    return "soko:" + hashlib.sha256(json.dumps([agent_id, inputs], sort_keys=True, default=str).encode()).hexdigest()
 
 
 class SokosumiLimb(Limb):
@@ -26,13 +34,17 @@ class SokosumiLimb(Limb):
     is_async_job = True
     retryable = False
     seconds = 180.0
-    outputs = {"result", "job_id", "credits", "files"}
+    outputs = {"result", "job_id", "credits", "files", "reused"}
 
     def estimate(self, args):
         n = float(args.get("max_credits") or 0)
         return Cost(credits=n, usd=pricing.credits(n), seconds=self.seconds)
 
     async def run(self, args, ctx):
+        key = _reuse_key(args["agent_id"], args.get("inputs") or {})
+        reused = store.cache_get(key, REUSE_SECONDS)
+        if reused is not None:
+            return {**reused, "credits": 0, "reused": True}
         cap = float(args["max_credits"])
         if cap + ctx.usage.credits > ctx.policy.max_credits:
             raise LimbError("job max_credits would exceed policy.max_credits")
@@ -42,7 +54,7 @@ class SokosumiLimb(Limb):
             args["agent_id"], args.get("inputs") or {}, float(args["max_credits"]), name=f"{ctx.spec.id}/{ctx.run_id}"
         )
         store.reserve_credits(ctx.run_id, ctx.step_id, cap)
-        return Pending({"job_id": job["id"], "agent_id": args["agent_id"]})
+        return Pending({"job_id": job["id"], "agent_id": args["agent_id"], "reuse_key": key, "started": time.time()})
 
     async def poll(self, state, ctx):
         job = await sokosumi.get_job(state["job_id"])
@@ -56,7 +68,10 @@ class SokosumiLimb(Limb):
                          for f in await sokosumi.get_files(job["id"])]
             except sokosumi.SokosumiError:
                 files = []
-            return {"result": job.get("result") or "", "job_id": job["id"], "credits": job.get("credits"), "files": files}
+            out = {"result": job.get("result") or "", "job_id": job["id"], "credits": job.get("credits"), "files": files}
+            if state.get("reuse_key"):
+                store.cache_put(state["reuse_key"], out)
+            return out
         if status == "input_required":
             req = await sokosumi.get_input_request(state["job_id"])
             return NeedsInput(req.get("message") or "", req.get("inputSchema"), {**state, "event_id": req["id"]})

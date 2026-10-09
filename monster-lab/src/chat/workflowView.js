@@ -38,6 +38,13 @@ export class WorkflowView {
     el.addEventListener('click', (ev) => {
       if (ev.target.closest('.wf-toggle')) el.classList.toggle('collapsed');
     });
+    // Hired agents take minutes; a ticking clock shows the step isn't frozen.
+    setInterval(() => {
+      for (const t of el.querySelectorAll('.wf-elapsed')) {
+        const s = Math.max(0, Math.round((Date.now() - Number(t.dataset.since)) / 1000));
+        t.textContent = `Hired agent working · ${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s (often 3–6 min)`;
+      }
+    }, 1000);
   }
 
   async show(def) {
@@ -74,7 +81,7 @@ export class WorkflowView {
   step(def, step) {
     const r = this._run(def);
     if (!r.steps.has(step.id)) r.order.push(step);
-    r.steps.set(step.id, { state: 'running', usage: null });
+    r.steps.set(step.id, { state: 'running', usage: null, since: Date.now() });
     this._maybeRender(def);
   }
 
@@ -131,6 +138,7 @@ export class WorkflowView {
       return `<div class="wf-box" data-state="${state}" title="${esc(b.note || b.label)} — ${esc(limbInfo(b.limb).label)}">
         <div class="wf-icon">${t.icon}</div>
         <div class="wf-text"><b>${esc(b.label)}</b>${b.note ? `<span class="wf-note">${esc(b.note)}</span>` : ''}<small>${esc(tool)}</small>
+          ${state === 'running' && kind === 'sokosumi' ? `<em class="wf-tag wf-elapsed" data-since="${live.since}">Hired agent working…</em>` : ''}
           ${b.when ? `<em class="wf-tag">only if ${esc(b.when)}</em>` : ''}${b.each ? `<em class="wf-tag">× up to ${b.each}</em>` : ''}</div>
         ${cost}
       </div>`;
