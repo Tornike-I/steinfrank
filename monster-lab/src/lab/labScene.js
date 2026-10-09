@@ -441,7 +441,7 @@ export class CameraRig {
     this.t = 0;
     this.shake = 0;
   }
-  // shot: { target: Vector3 | () => Vector3, dir: Vector3, fitH, fitW, fov }
+  // shot: { target: Vector3 | () => Vector3, dir: Vector3, fitH, fitW, fov, pos?: Vector3 | () => Vector3 }
   set(shot, { speed = 2.2, cut = false } = {}) {
     this.shot = shot;
     this.speed = speed;
@@ -458,7 +458,8 @@ export class CameraRig {
     // Width matters on wide stages, but never let it push the camera miles away on narrow ones.
     const d = Math.max(dH, Math.min(dW, dH * 1.5));
     this._dt = tgt.clone();
-    this._dp = tgt.clone().addScaledVector(s.dir.clone().normalize(), d);
+    // A shot can pin the camera somewhere and only aim it (`pos`).
+    this._dp = s.pos ? (typeof s.pos === 'function' ? s.pos() : s.pos).clone() : tgt.clone().addScaledVector(s.dir.clone().normalize(), d);
     this._fov = s.fov ?? 30;
   }
   update(dt) {

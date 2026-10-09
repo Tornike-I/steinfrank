@@ -116,25 +116,19 @@ export class LabCreatures {
     }
   }
 
-  // The floor shows every built monster: missing ones (e.g. after a cleanup)
-  // wander back in, and name tags follow the monster's title.
+  // Keep name tags in step with each monster's title. Monsters killed in a
+  // cleanup stay gone from the floor (their chats live on in the tabs); only
+  // a newly built monster walks in, and a summon brings a temporary stand-in.
   sync(defs) {
     for (const def of defs) {
       const title = titleOf(def);
       const c = [...this.creatures.values()].find((x) => x.defId === def.id && x.state === 'alive' && !x.temporary);
-      if (c) {
-        if (c.name !== title) {
-          if (c.label) c.group.remove(c.label);
-          c.name = title;
-          c.label = makeLabel(title);
-          c.group.add(c.label);
-        }
-        continue;
+      if (c && c.name !== title) {
+        if (c.label) c.group.remove(c.label);
+        c.name = title;
+        c.label = makeLabel(title);
+        c.group.add(c.label);
       }
-      const n = this._make({ id: `w-${def.id}-${Date.now().toString(36)}`, seed: def.seed, defId: def.id, theme: def.theme, name: title, limbs: def.limbs || [], form: def.form || 1 });
-      n.pos.copy(this._freeSpot(this._randomPoint(), 0.45));
-      n.yaw = n.yawT = Math.random() * 6.28;
-      this._place(n);
     }
   }
 
@@ -252,13 +246,14 @@ export class LabCreatures {
   // An existing assistant answers a lab question: its counterpart turns to
   // the viewer, charges at the camera and screams. If it was destroyed, a
   // temporary stand-in walks in from the side for the transition.
-  summon(rec, { onScream, target: at } = {}) {
+  summon(rec, { onStart, onScream, target: at, hold = 1.3, lunge = null } = {}) {
     return new Promise((resolve) => {
       let c = [...this.creatures.values()].find((x) => x.defId === rec.defId && x.state === 'alive');
       let temporary = false;
       if (!c) {
         c = this._make({ ...rec, id: `tmp-${rec.defId}-${Date.now()}` });
-        c.pos.set(Math.random() < 0.5 ? -3.0 : 3.8, 0, 1.6);
+        // In view, on the floor in front of the slab, so its charge is seen.
+        c.pos.copy(this._freeSpot(V(0.6 + (Math.random() < 0.5 ? -1 : 1) * (0.9 + Math.random() * 0.6), 0, 1.25), 0.5));
         c.temporary = temporary = true;
       }
       let target = at?.clone();
@@ -267,8 +262,9 @@ export class LabCreatures {
         target = this.camera.position.clone().addScaledVector(fwd, 1.3 + c.m.height * 0.6).setY(0);
       }
       c.state = 'summoned';
-      c.sum = { t: 0, from: c.pos.clone(), home: c.pos.clone(), target, onScream, resolve, temporary, screamed: false };
+      c.sum = { t: 0, from: c.pos.clone(), home: c.pos.clone(), target, onScream, resolve, temporary, screamed: false, hold, lunge };
       this._place(c);
+      onStart?.(c);
     });
   }
 
@@ -426,7 +422,8 @@ export class LabCreatures {
     return d;
   }
 
-  _comic(pos, text, size = 1) {
+  // `screen` ({ x, y, d }) keeps it at a fixed spot in front of the camera.
+  _comic(pos, text, size = 1, screen = null) {
     const cv = document.createElement('canvas');
     cv.width = 512; cv.height = 320;
     const g = cv.getContext('2d');
@@ -450,7 +447,7 @@ export class LabCreatures {
     sprite.renderOrder = 20;
     sprite.position.copy(pos);
     this.scene.add(sprite);
-    this.sprites.push({ sprite, t: 0, life: 1.5, size });
+    this.sprites.push({ sprite, t: 0, life: 1.5, size, screen });
   }
 
   // --------------------------------------------------------------- frame
@@ -483,6 +480,10 @@ export class LabCreatures {
       const pop = Math.min(1, s.t / 0.15);
       const sc = (0.5 + pop * 0.5) * s.size;
       s.sprite.scale.set(1.6 * sc, 1.0 * sc, 1);
+      if (s.screen) {
+        const cam = this.camera;
+        s.sprite.position.set(s.screen.x * s.screen.d, s.screen.y * s.screen.d, -s.screen.d).applyMatrix4(cam.matrixWorld);
+      }
       if (s.t > s.life || s.fade) s.sprite.material.opacity -= dt * 4;
       if (s.sprite.material.opacity <= 0) { this.scene.remove(s.sprite); s.sprite.material.map.dispose(); return false; }
       return true;
@@ -523,7 +524,6 @@ export class LabCreatures {
       if (u >= 1) {
         c.pos.y = 0;
         c.state = 'alive'; c.mode = 'idle'; c.timer = 0.8;
-        this.fx.smoke(c.pos.clone().setY(0.05), 6, 0x6a6050);
         a.resolve?.();
       }
       this._place(c);
@@ -619,22 +619,34 @@ export class LabCreatures {
     const toCam = Math.atan2(this.camera.position.x - c.pos.x, this.camera.position.z - c.pos.z);
     if (k.t < charge) {
       const u = k.t / charge;
-      c.pos.lerpVectors(k.from, k.target, u * u);
+      // Accelerate, then brake hard right in front of the lens.
+      const e = u < 0.75 ? (u / 0.75) ** 2 * 0.9 : 0.9 + 0.1 * (1 - (1 - (u - 0.75) / 0.25) ** 2);
+      c.pos.lerpVectors(k.from, k.target, e);
       let dy = toCam - c.yaw;
       dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       c.yaw += dy * 0.5;
       c.phase += dt * 16;
-      animateMonster(m, c.t, { walk: 1, phase: c.phase, excite: 0.3 });
+      animateMonster(m, c.t, { walk: 1, phase: c.phase, excite: 0.3, look: 0 });
     } else {
       if (!k.screamed) {
         k.screamed = true;
         k.onScream?.();
-        this._comic(c.pos.clone().add(V(0, m.height + 0.35, 0)), 'AAAARGH!', 0.55);
+        // Pinned to the screen, upper right of the face that fills the lens
+        // (a world position would balloon as the camera pushes in).
+        this._comic(c.pos.clone(), 'AAAARGH!', 0.15, { x: 0.12, y: 0.14, d: 0.9 });
       }
       c.yaw = toCam;
+      // Lean in toward the lens while screaming.
+      if (k.lunge) {
+        const u = Math.min(1, (k.t - charge) / k.hold);
+        c.pos.lerpVectors(k.target, k.lunge, 1 - (1 - u) ** 2);
+        this._place(c);
+      }
       c.group.position.x = c.pos.x + (Math.random() - 0.5) * 0.02;
-      animateMonster(m, c.t, { excite: 1, verb: 'cheer', verbW: 1, talk: 1 });
-      if (k.t > charge + 1.3 && k.resolve) {
+      // Head and eyes straight at the lens.
+      animateMonster(m, c.t, { excite: 1, verb: 'cheer', verbW: 1, talk: 1, look: 0 });
+      for (const h of m.heads) { h.pivot.rotation.y = 0; h.head.rotation.x = -0.08 + Math.sin(c.t * 31) * 0.03; h.head.rotation.z = Math.sin(c.t * 23) * 0.05; }
+      if (k.t > charge + k.hold && k.resolve) {
         const r = k.resolve;
         k.resolve = null;
         r();

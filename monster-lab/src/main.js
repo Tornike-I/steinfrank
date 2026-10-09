@@ -234,6 +234,7 @@ function adaptResolution(now) {
   }
 }
 
+let viewLift = 1;
 function step(now) {
   timer.update(now);
   adaptResolution(now);
@@ -247,7 +248,9 @@ function step(now) {
   lab.camera.aspect = aspect;
   // In the Lab the prompt covers the bottom of the scene, so frame everything
   // a little higher by offsetting the projection window.
-  if (inLab) lab.camera.setViewOffset(r.w, r.h, 0, r.h * 0.13, r.w, r.h);
+  // A summon eases this to 0 so the screaming face sits dead centre.
+  viewLift += (director.viewLift - viewLift) * Math.min(1, dt * 4);
+  if (inLab) lab.camera.setViewOffset(r.w, r.h, 0, r.h * 0.13 * viewLift, r.w, r.h);
   else lab.camera.clearViewOffset();
   director.update(dt);
   lab.update(dt);

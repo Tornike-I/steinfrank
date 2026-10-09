@@ -27,17 +27,28 @@ npm run build      # static bundle in dist/
   wandering monsters are in the scene, with a single prompt bar at the
   bottom. **No text answers are shown here.**
 - You describe a job ("check whether an online shop is a scam") and its
-  **topic** is detected (20 topics, see §4); the topic picks the monster's
-  look and voice.
+  **topic** is detected (`registry.topicForJob()`). There is exactly **one
+  monster per topic**; the topic picks its look and voice, and its tab is
+  named after the topic ("Weather monster", never "Prague weather bot").
   - **New topic:** Frankenstein forges a monster for it while the surgical
     cinematic plays (pull back to the slab, incision, sew, lever, lightning,
     reveal). The monster leaps off the table, starts wandering, and its tab
     opens.
-  - **Topic that already has a monster** (e.g. a second weather bot): that
-    topic's most recent monster charges the screen and screams (a temporary
-    stand-in if its counterpart was destroyed), then its existing chat opens.
-    Nothing new is built, and the prompt isn't sent to it.
-  - Jobs with no recognised topic ("generic") always get a new monster.
+  - **Topic that already has a monster** (a second weather bot, or any
+    weather-related job): that monster **learns the job** (added to its
+    `jobs`; a "Learned a new job" note appears in its chat; with the backend
+    up it is re-forged in the background to cover all its jobs and keeps
+    answering with the old version until the new one is published). It then
+    charges the camera and screams with its face filling the centre of the
+    screen (a temporary stand-in walks in if its counterpart was destroyed),
+    the camera dives at its face, the stage dips to black, and its existing
+    chat opens: the room fades in with the camera pulling back from the face
+    while the chat and workflow panels rise into place. Nothing new is built,
+    and the prompt isn't sent to it.
+  - **No recognised topic:** a new monster is built and gets its own custom
+    topic, named from the job's key words ("Online shop scam monster").
+    Later jobs that share enough of those words ("is this shop legit?") are
+    sent to it like any other known topic.
 - **Stop during creation:** the scientist hoists the unfinished body into the
   bin and returns to idle. No assistant or tab is created.
 - **Clicking a wandering monster** (or its name tag) opens its tab.
@@ -45,7 +56,9 @@ npm run build      # static bundle in dist/
   threshold (gear menu, default 8), the current operation finishes, and then:
   bomb, scientist takes cover, KA-BLAM, acid dissolves the remains, and the
   scientist hoses down the lab floor. Cleanup destroys **only the wandering
-  counterparts**; assistants, tabs and histories are never touched. You can
+  counterparts**; assistants, tabs and histories are never touched, and the
+  killed counterparts stay gone (switching tabs or reloading doesn't bring
+  them back; only newly built monsters walk in). You can
   keep typing during cleanup, and a submitted question is queued until the
   wash ends.
 
@@ -148,6 +161,16 @@ full-screen lab.
   wrist targets, hand orientations, feet targets, spine lean and twist, look
   target, jaw, brows and blink. Tool tips are placed exactly via
   `wristFor(tip)`. Poses blend on action change.
+- Collision: hands are kept out of the table, the patient and his own body
+  (spheres on his bones, an ellipsoid fitted to his egg-shaped cranium, the
+  loupe and nose). After the arm IK, `_settleHands()` checks the real glove
+  geometry (a 3×3 palm grid, finger segments and thumb) against all of that
+  and against the other glove, nudging the hands apart (the nudge carries
+  over frames, so rubbing palms touch without overlapping). If an arm would
+  pass through his head he straightens his back and then tips his head,
+  easing in within a few frames and letting go slowly.
+- Face: head look-at, brows, jaw and blinks are eased, so actions that switch
+  them outright never make the eyes and brows glitch.
 - Actions: `idle`, `greet`, `snap`, `walk` (planted alternating feet),
   `incise`, `sew`, `attach`, `organ`, `inject`, `zap`, `scrap`,
   `throwThing` (bomb or acid), `cower`, `hose`, `celebrate`.
@@ -157,8 +180,12 @@ full-screen lab.
 - `create(def)`: a short fixed cinematic, made of drop-in, snap, walk, two
   surgical actions, zap and reveal, then a leap into the creature layer.
   It **resolves on hand-off** and rejects if cancelled (the scrap animation).
-- `summon(def)`: the creature layer's turn, charge and scream, plus a
-  scientist reaction.
+- `summon(def, { into })`: the camera is pinned at the monster's eye level
+  and aims at its face (`faceOf()`), so the monster grows as it charges and
+  brakes right in front of the lens; while it screams (caption pinned to the
+  screen, a warm light on its face) the camera pushes in, then dives at the
+  face and `into()` hands over to the room. The lab's raised framing
+  (`viewLift`) eases to 0 meanwhile so the face is dead centre.
 - `maybeCleanup()`: bomb, acid and hose, only while the Lab is visible.
   Afterwards it calls back so a queued question can run.
 - Camera shots are subject, direction and how much must fit (`fitH`/`fitW`),
@@ -195,8 +222,12 @@ An assistant (persisted in `state.monsters`):
 }
 ```
 
-- **One assistant per topic.** `registry.findByTopic()`. A draft is
-  committed only when creation completes.
+- **One assistant per topic.** `registry.topicForJob(job)` returns the
+  built-in topic (`matchTheme()`) or, for unrecognised jobs, the custom topic
+  (`topic: { label, keywords }`, keyword stems of its jobs) it shares at
+  least half its key words with, plus the monster that already covers it.
+  `learnJob()` adds a related job to `jobs`. A draft is committed only when
+  creation completes.
 - `ai/assistants.js → respond(assistant, input, { signal, history })` returns
   an async iterable of events:
   `{type:'step', step}`, `{type:'stepDone', step}`, `{type:'token', text}`.
@@ -276,7 +307,7 @@ by a refresh become `stopped`. Switching tabs never clears anything.
 
 - **Backend:** run `python -m uvicorn frankenstein.api:app` from `frankenstein/` (port 8000). The Vite dev server proxies `/frank/*` to it (`FRANK_URL` overrides the target). The header chip shows *Frankenstein* when the API is reachable and *Offline · scripted* otherwise. Force offline with `?offline=1` or `localStorage["stitchwick-lab.offline"]="1"`.
 - **Several tabs** share storage: each tab merges the others' assistants (by id) via the `storage` event, so a stale tab can't drop monsters created elsewhere.
-- **Creation (real mode):** a new-topic Lab question → `POST /forge` with a brief asking for a single `question` input. The surgery keeps going until the forge returns. Then `publish` runs (voice only with `VITE_FRANK_VOICE=1`), each limb in the spec is delivered onto the slab and sewn on, there's lightning, and the monster leaps onto the floor. Forge errors (refused, invalid, or missing `OPENAI_API_KEY`) scrap the body and show the reason in the banner.
+- **Creation (real mode):** a new-topic Lab job → `POST /forge` with a brief for a topic assistant (a single `question` input) that must handle all of the monster's `jobs`. Learning a job re-forges and re-publishes it the same way, in the background. The surgery keeps going until the forge returns. Then `publish` runs (voice only with `VITE_FRANK_VOICE=1`), each limb in the spec is delivered onto the slab and sewn on, there's lightning, and the monster leaps onto the floor. Forge errors (refused, invalid, or missing `OPENAI_API_KEY`) scrap the body and show the reason in the banner.
 - **Answers (real mode):** `POST /monsters/{id}/runs` + SSE `/runs/{id}/events`. The UI infers running steps from the spec order and the run log. `needs_input` becomes a question callout answered from the composer, and `needs_confirmation` becomes an Approve/Decline card (credits are never spent without a click). `output.speech` is quoted (audio plays only if sound is on) and `output.report` streams as the answer. There's no cancel endpoint, so Stop only stops following the run. A JSON object typed into a monster tab is passed as raw inputs.
 - **Limbs → body parts** (`src/monsters/limbParts.js`): web_search = telescope eye, http_fetch = grabber claw, llm = brain jar, forged:* = carved wooden limb, sokosumi = hired tentacle with a price tag, tts = gramophone horn, sfx = squeezebox, image = camera eye, notify = alarm bell. The matching part animates while its step runs. Scripted monsters get limbs implied by their workflow's step kinds.
 - **Floor:** wandering counterparts are 3D actors on the lab floor (`src/lab/labCreatures.js`), with blob shadows, name-tag sprites and raycast clicking. The camera's resting shot pulls back to show the floor whenever monsters exist. Bomb and acid land in the crowd. The scientist then hoses the floor itself (`src/lab/water.js`): he turns round, picks the nozzle up off the hose coiled on the floor behind him, and sweeps a glossy ballistic stream (droplets breaking off) side to side across the floor with both hands, then drops it back on the coil. Where it lands, a wet film spreads and keeps flowing toward the camera (the bottom of the screen), darkening the floor with moving ripple glints. Blood, scorch marks and acid puddles under the flow are diluted and carried along until they wash off, and the film drains away after the hose stops.
@@ -285,8 +316,11 @@ by a refresh become `stopped`. Switching tabs never clears anything.
 
 - Answers are simulated. Workflow outputs are invented, except that Math
   really does the arithmetic. Each simulated answer says so.
-- Topic detection is keyword-based. A real router (an LLM classifier) can
-  replace `matchTheme()` without touching the choreography.
+- Topic detection is keyword-based, and so is grouping unrecognised jobs
+  into custom topics (shared key words, so "is this site legit" and "check
+  whether an online shop is a scam" only match through "shop"). A real
+  router (an LLM classifier) can replace `topicForJob()` without touching
+  the choreography.
 - The surgery's wounds and stitches exist only on the lab instance. The
   wandering and den copies are rebuilt from the seed with their generated
   stitches.

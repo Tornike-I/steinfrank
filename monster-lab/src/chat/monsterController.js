@@ -140,7 +140,7 @@ export class MonsterController {
     this.ui.updateMessage(msg);
     this.ui.renderControls();
     const live = () => state.mode === 'monsters' && this.den.def?.id === def.id;
-    const history = def.chat.slice(0, -1).map(({ role, content }) => ({ role, content }));
+    const history = def.chat.slice(0, -1).filter((m) => m.role !== 'note').map(({ role, content }) => ({ role, content }));
     try {
       this.wf?.begin(def);
       const sounds = await this._sounds(def);

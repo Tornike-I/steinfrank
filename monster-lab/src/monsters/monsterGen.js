@@ -996,3 +996,14 @@ export function bodyOf(seed, variety) {
   const mul = vr.weighted(SIZES)(vr);
   return { plan, size: mul < 0.7 ? 'tiny' : mul > 1.5 ? 'giant' : mul > 1.1 ? 'big' : 'normal' };
 }
+
+// Where a monster's face is right now (world space) and roughly how big it
+// is: its first head, or the torso for headless body plans.
+export function faceOf(m) {
+  const h = m.heads?.[0];
+  const obj = h ? h.head : m.torso;
+  const rad = h ? h.rad : m.torsoRadii;
+  const pos = obj.localToWorld(new THREE.Vector3());
+  const s = obj.getWorldScale(new THREE.Vector3()).y;
+  return { pos, r: Math.max(0.05, (rad?.y ?? 0.2) * s) };
+}

@@ -241,7 +241,14 @@ export class Scientist {
       sph(spine, 0, 0.42, 0, 0.155),
       sph(spine, 0, 0.14, 0.07, 0.19), // pot belly
       sph(spine, 0.03, 0.42, -0.1, 0.16), // hunch
-      sph(head, 0, 0.27, -0.01, 0.25), // cranium
+      // The egg-shaped cranium as an ellipsoid fitted to its mesh (a single
+      // ball was ~4 cm too wide at the lower sides, which kept the arms
+      // needlessly far from his face), plus its flared crown, the brass
+      // loupe and the big nose.
+      { kind: 'ellipsoid', obj: this.cranium, rad: V(0.215, 0.262, 0.23), self: true },
+      sph(head, 0, 0.40, -0.035, 0.13), // crown
+      sph(head, 0.085, 0.29, 0.215, 0.075), // loupe
+      sph(head, 0, 0.21, 0.27, 0.06), // nose
       sph(head, 0, 0.075, 0.09, 0.09), // jaw and chin
     ];
   }
@@ -257,7 +264,7 @@ export class Scientist {
       p.setXYZ(i, p.getX(i) * f, y, z * f - 0.03 * (y / 0.25));
     }
     lumpy(g, 0.008, 6, 21);
-    const cranium = mesh(g, skin);
+    const cranium = (this.cranium = mesh(g, skin));
     cranium.position.set(0, 0.24, 0);
     head.add(cranium);
     // Scar across the scalp, projected onto the actual cranium surface.
@@ -480,6 +487,12 @@ export class Scientist {
     const w = smooth(t / (a.blend ?? 0.3));
     blendPose(this.pose, this._prev, this._raw, w);
     this.collide = a.collide !== false;
+    this._dt = dt * this.timeScale;
+    if (this._nudge) {
+      const k = Math.exp(-dt * 1.5);
+      this._nudge.R.multiplyScalar(k);
+      this._nudge.L.multiplyScalar(k);
+    }
     this.apply(this.pose);
     if (!a.loop && a.t >= a.duration && a._resolve) {
       const r = a._resolve;
@@ -525,32 +538,97 @@ export class Scientist {
     // Head look-at in the neck's parent (chest) space, clamped.
     const chestInv = new THREE.Matrix4().copy(this.chest.matrixWorld).invert();
     const lp = p.look.clone().applyMatrix4(chestInv).sub(this.neck.position);
-    const yaw = THREE.MathUtils.clamp(Math.atan2(lp.x, lp.z), -1.1, 1.1);
-    const pitch = THREE.MathUtils.clamp(-Math.atan2(lp.y - 0.25, Math.hypot(lp.x, lp.z)), -0.6, 1.0);
+    const yawT = THREE.MathUtils.clamp(Math.atan2(lp.x, lp.z), -1.1, 1.1);
+    const pitchT = THREE.MathUtils.clamp(-Math.atan2(lp.y - 0.25, Math.hypot(lp.x, lp.z)), -0.6, 1.0);
+    // Actions often switch what he looks at outright; the head follows
+    // quickly but smoothly rather than snapping (which read as the eyes and
+    // brows glitching).
+    const dt = this._dt ?? 1 / 60;
+    const g = (this._gaze ||= { yaw: yawT, pitch: pitchT });
+    const kG = 1 - Math.exp(-dt * 9);
+    g.yaw += (yawT - g.yaw) * kG;
+    g.pitch += (pitchT - g.pitch) * kG;
+    const yaw = g.yaw, pitch = g.pitch;
     this.neck.rotation.set(pitch * 0.4, yaw * 0.4, 0);
     this.head.rotation.set(pitch * 0.6 + jitter(4), yaw * 0.6, p.headTilt);
-    this.jaw.rotation.x = p.jaw * 0.55;
-    this.mouth.scale.y = 0.026 + p.jaw * 0.05;
-    for (const l of this.lids) l.lid.rotation.x = lerp(l.open, Math.PI / 2, p.blink);
+    // Actions switch brow and jaw between values outright; ease the face
+    // toward them so expressions never snap (blinks stay quick).
+    const f = (this._face ||= { brow: p.brow, jaw: p.jaw, blink: p.blink });
+    const ease = (rate) => 1 - Math.exp(-dt * rate);
+    f.brow += (p.brow - f.brow) * ease(10);
+    f.jaw += (p.jaw - f.jaw) * ease(28);
+    f.blink += (p.blink - f.blink) * ease(45);
+    this.jaw.rotation.x = f.jaw * 0.55;
+    this.mouth.scale.y = 0.026 + f.jaw * 0.05;
+    for (const l of this.lids) l.lid.rotation.x = lerp(l.open, Math.PI / 2, f.blink);
     this.brows.forEach((b, i) => {
-      b.b.position.y = b.y - p.brow * 0.025;
-      b.b.rotation.z = Math.PI / 2 + b.rz + (i === 0 ? -1 : 1) * p.brow * 0.3;
+      b.b.position.y = b.y - f.brow * 0.025;
+      b.b.rotation.z = Math.PI / 2 + b.rz + (i === 0 ? -1 : 1) * f.brow * 0.3;
     });
     this.root.updateMatrixWorld(true);
 
     // Arms, with posture correction: if an arm would pass through his own
     // head or chin (he leans over the slab with a very big head), he lifts his
     // head back and, if that is not enough, straightens up a little.
-    this._solveArms(p);
-    for (let i = 0; i < 8 && this._armsHitHead(); i++) {
-      if (i % 2 === 0 || this.spine.rotation.x < 0.05) {
-        this.neck.rotation.x -= 0.1;
-        this.head.rotation.x -= 0.1;
+    // He straightens his back a little first, then alternates tipping his
+    // head back with straightening further. The correction eases in within a
+    // few frames and lets go slowly, so his head never jerks or bobs from
+    // frame to frame (the face glitch) when an arm passes near it.
+    const bend = (i, frac) => {
+      if ((i < 2 || i % 2 === 1) && this.spine.rotation.x > 0.05) {
+        this.spine.rotation.x -= 0.07 * frac;
       } else {
-        this.spine.rotation.x -= 0.07;
+        this.neck.rotation.x -= 0.1 * frac;
+        this.head.rotation.x -= 0.1 * frac;
       }
+    };
+    const neckX = this.neck.rotation.x, headX = this.head.rotation.x;
+    this._solveArms(p);
+    // Each step re-solves only the arm that hits; the other is re-solved once
+    // at the end (its shoulder moved with the bend).
+    let need = 0, hitters;
+    const stale = new Set();
+    for (; need < 10 && (hitters = this._headHitters()).length; need++) {
+      bend(need, 1);
+      this.root.updateMatrixWorld(true);
+      for (const k of ['R', 'L']) {
+        if (hitters.includes(k)) { this._solveArm(k, p, this._nudge?.[k]); stale.delete(k); } else stale.add(k);
+      }
+    }
+    for (const k of stale) this._solveArm(k, p, this._nudge?.[k]);
+    const prev = this._lean || 0;
+    const held = need > prev ? Math.min(need, prev + dt * 90) : Math.max(need, prev - dt * 2.5);
+    this._lean = held;
+    if (Math.abs(held - need) > 1e-3) {
+      // Redo the posture with the eased amount instead of the raw one.
+      this.spine.rotation.x = p.spineX;
+      this.neck.rotation.x = neckX;
+      this.head.rotation.x = headX;
+      for (let i = 0; i < held; i++) bend(i, Math.min(1, held - i));
       this.root.updateMatrixWorld(true);
       this._solveArms(p);
+    }
+    // Then the real glove geometry (thumb and fingertips included) is kept
+    // out of solids, out of himself, and out of the other hand. Moving the
+    // hands re-solves the arms, which can bring an elbow back into his head,
+    // so check that once more.
+    this._settleHands(p);
+    if (this._armsHitHead()) {
+      // A couple more steps, kept only if they actually clear it (with his
+      // arms up behind his head, tipping it back would only make it worse).
+      const keep = [this.spine.rotation.x, this.neck.rotation.x, this.head.rotation.x];
+      let cleared = false;
+      for (let i = Math.ceil(held); i < Math.ceil(held) + 3 && !cleared; i++) {
+        bend(i, 1);
+        this.root.updateMatrixWorld(true);
+        this._solveArms(p);
+        cleared = !this._armsHitHead();
+      }
+      if (!cleared) {
+        [this.spine.rotation.x, this.neck.rotation.x, this.head.rotation.x] = keep;
+        this.root.updateMatrixWorld(true);
+        this._solveArms(p);
+      }
     }
     // Legs: knees point forward.
     for (const k of ['R', 'L']) {
@@ -564,63 +642,200 @@ export class Scientist {
   }
 
   _solveArms(p) {
-      for (const k of ['R', 'L']) {
-        const arm = this.arms[k];
-        const h = p['h' + k];
-        const target = h.p.clone();
-        // Keep the hand (and its fingertips) out of solids and out of himself.
-        this._keepOut(target, 0.06, h.q);
-        // Elbow placements to try, in order: hanging out and back, out to the
-        // side, lifted up and out (reaching over), forward and out.
-        const poles = [
-          this.local(p.rootPos, p.rootYaw, arm.side * 0.9, 0.9, -0.6),
-          this.local(p.rootPos, p.rootYaw, arm.side * 1.6, 0.9, -0.1),
-          this.local(p.rootPos, p.rootYaw, arm.side * 0.8, 2.0, -0.2),
-          this.local(p.rootPos, p.rootYaw, arm.side * 1.7, 1.5, 0.1),
-          this.local(p.rootPos, p.rootYaw, arm.side * 1.3, 1.1, 0.6),
-        ];
-        let clear = false;
-        for (let i = 0; i < poles.length && !clear; i++) {
-          solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
-          clear = !this._armHits(arm, target);
-        }
-        if (!clear) {
-          // Last resort: move the hand outward from his chest (and up, over any
-          // table or patient) until the whole arm is clear.
-          const chest = this.chest.getWorldPosition(V());
-          const out = target.clone().sub(chest).setY(0);
-          if (out.lengthSq() < 1e-4) out.copy(this.dir(p.rootYaw, arm.side, 0, 0.5));
-          out.normalize();
-          let best = poles[1];
-          for (let i = 0; i < 10 && !clear; i++) {
-            target.addScaledVector(out, 0.035);
-            target.y += 0.03; // a little higher too: forearms come down onto things more steeply
-            for (const pole of [poles[1], poles[3], poles[2]]) {
-              solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, pole);
-              if (!this._armHits(arm, target)) { clear = true; best = pole; break; }
-            }
-          }
-          if (!clear) solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, best);
-        }
-        setWorldQuat(arm.hand, h.q, arm.fore);
-        const c = h.curl;
-        arm.fingers.forEach((f, i) => { f.rotation.x = -c * (i % 2 ? 1.25 : 1.0); });
-        arm.fingers.thumb.rotation.x = 0.4 + c * 0.5;
-      }
+    for (const k of ['R', 'L']) this._solveArm(k, p, this._nudge?.[k]);
   }
 
-  _armsHitHead() {
-    const head = this.selfShapes.filter((o) => o.obj === this.head);
+  // `nudge` shifts the hand from its posed target (see _settleHands).
+  _solveArm(k, p, nudge = null) {
+    const arm = this.arms[k];
+    const h = p['h' + k];
+    const target = h.p.clone();
+    if (nudge) target.add(nudge);
+    // Keep the hand (and its fingertips) out of solids and out of himself.
+    this._keepOut(target, 0.06, h.q);
+    // His body doesn't move while one arm is solved: place the shapes once.
+    const snap = this._shapeSnapshot();
+    // Elbow placements to try, in order: hanging out and back, out to the
+    // side, lifted up and out (reaching over), forward and out.
+    const poles = [
+      this.local(p.rootPos, p.rootYaw, arm.side * 0.9, 0.9, -0.6),
+      this.local(p.rootPos, p.rootYaw, arm.side * 1.6, 0.9, -0.1),
+      this.local(p.rootPos, p.rootYaw, arm.side * 0.8, 2.0, -0.2),
+      this.local(p.rootPos, p.rootYaw, arm.side * 1.7, 1.5, 0.1),
+      this.local(p.rootPos, p.rootYaw, arm.side * 1.3, 1.1, 0.6),
+    ];
+    let clear = false;
+    for (let i = 0; i < poles.length && !clear; i++) {
+      solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
+      clear = !this._armHits(arm, target, snap);
+    }
+    // Only his head in the way? Then keep the hand where it should be: the
+    // head-lift in apply() deals with that, more cheaply and without pulling
+    // the hand off its mark (a scalpel off the incision line).
+    const head = (o) => o.src.obj === this.head || o.src.obj === this.cranium;
+    if (!clear) {
+      const body = snap.filter((o) => !head(o));
+      for (let i = 0; i < poles.length && !clear; i++) {
+        solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
+        clear = !this._armHits(arm, target, body);
+      }
+    }
+    if (!clear) {
+      // Last resort: move the hand outward from his chest (and up, over any
+      // table or patient) until the whole arm is clear.
+      const chest = this.chest.getWorldPosition(V());
+      const out = target.clone().sub(chest).setY(0);
+      if (out.lengthSq() < 1e-4) out.copy(this.dir(p.rootYaw, arm.side, 0, 0.5));
+      out.normalize();
+      let best = poles[1];
+      for (let i = 0; i < 10 && !clear; i++) {
+        target.addScaledVector(out, 0.035);
+        target.y += 0.03; // a little higher too: forearms come down onto things more steeply
+        for (const pole of [poles[1], poles[3], poles[2]]) {
+          solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, pole);
+          if (!this._armHits(arm, target, snap)) { clear = true; best = pole; break; }
+        }
+      }
+      if (!clear) solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, best);
+    }
+    setWorldQuat(arm.hand, h.q, arm.fore);
+    const c = h.curl;
+    arm.fingers.forEach((f, i) => { f.rotation.x = -c * (i % 2 ? 1.25 : 1.0); });
+    arm.fingers.thumb.rotation.x = 0.4 + c * 0.5;
+    arm.hand.updateMatrixWorld(true);
+  }
+
+  // Points (with radii) covering a glove as it is now posed: a 3×3 grid over
+  // the palm, two along each finger segment, two along the thumb.
+  _handPoints(k) {
+    const arm = this.arms[k];
+    const g = this._gloveGeo(arm);
+    const out = [];
+    for (const x of [-0.55, 0, 0.55]) {
+      for (const y of [-0.55, 0, 0.55]) out.push({ p: g.palm.localToWorld(V(x, y, 0)), r: x || y ? 0.03 : 0.033 });
+    }
+    arm.fingers.forEach((f, i) => {
+      const m = g.fingerMesh[i], r = i % 2 ? 0.014 : 0.0155;
+      for (const u of [0.35, 0.9]) out.push({ p: m.localToWorld(V(0, g.fingerLen[i] * u, 0)), r });
+    });
+    for (const u of [0.35, 0.9]) out.push({ p: g.thumbMesh.localToWorld(V(0, g.thumbLen * u, 0)), r: 0.016 });
+    return out;
+  }
+
+  _gloveGeo(arm) {
+    if (arm._glove) return arm._glove;
+    const meshOf = (o) => o.children.find((c) => c.isMesh);
+    const lenOf = (m) => { m.geometry.computeBoundingBox(); return m.geometry.boundingBox.min.y; };
+    const fingerMesh = arm.fingers.map(meshOf);
+    const thumbMesh = meshOf(arm.fingers.thumb);
+    arm._glove = {
+      palm: arm.hand.children.find((c) => c.isMesh),
+      fingerMesh, fingerLen: fingerMesh.map(lenOf),
+      thumbMesh, thumbLen: lenOf(thumbMesh),
+    };
+    return arm._glove;
+  }
+
+  // After IK: nudge each hand until no part of either glove is inside a
+  // solid (or his own body), and the two gloves only touch, never overlap.
+  // A hand holding a tool stays put if it can; the free one gives way.
+  // The nudge carries over to the next frame (fading slowly), so hands that
+  // stay in contact, like rubbing palms, rarely need a re-solve.
+  _settleHands(p) {
+    const nudge = (this._nudge ||= { R: V(), L: V() });
+    const holding = (k) => this.arms[k].grip.children.length > 0;
+    for (let iter = 0; iter < 6; iter++) {
+      const pts = { R: this._handPoints('R'), L: this._handPoints('L') };
+      const shapes = this._shapeSnapshot();
+      const fix = { R: V(), L: V() };
+      let any = false;
+      for (const k of ['R', 'L']) {
+        // Broad phase: the whole glove fits in a 0.16 m ball round the palm.
+        const c = pts[k][4].p;
+        for (const o of shapes) {
+          if (o.ball && c.distanceTo(o.ball) > o.r + 0.2) continue;
+          for (const q of pts[k]) {
+            const m = o.src.self ? q.r * 0.5 : q.r;
+            if (!this._hitFast(o, q.p, m)) continue;
+            const e = this._exit(o.src, q.p, m);
+            if (e.lengthSq() > fix[k].lengthSq()) fix[k].copy(e);
+            any = true;
+          }
+        }
+      }
+      // Glove against glove: the deepest overlap, resolved by moving the
+      // hands apart as wholes (centre to centre). Pushing along each
+      // overlapping pair instead fights itself when the fingers interlock.
+      let worst = 0;
+      if (pts.R[4].p.distanceTo(pts.L[4].p) < 0.4) {
+        for (const a of pts.R) {
+          for (const b of pts.L) worst = Math.max(worst, a.r + b.r - a.p.distanceTo(b.p));
+        }
+      }
+      if (worst > 0.002) {
+        const centre = (list) => list.reduce((acc, q) => acc.add(q.p), V()).multiplyScalar(1 / list.length);
+        let dir = centre(pts.R).sub(centre(pts.L));
+        if (dir.lengthSq() < 1e-8) dir = this.dir(p.rootYaw, -1, 0, 0);
+        dir.normalize().multiplyScalar(worst + 0.003);
+        const kR = holding('R') === holding('L') ? 0.5 : holding('R') ? 0 : 1;
+        fix.R.addScaledVector(dir, kR);
+        fix.L.addScaledVector(dir, -(1 - kR));
+        any = true;
+      }
+      if (!any) return;
+      for (const k of ['R', 'L']) {
+        if (fix[k].lengthSq() < 1e-10) continue;
+        nudge[k].add(fix[k]);
+        this._solveArm(k, p, nudge[k]);
+      }
+    }
+  }
+
+  // Shapes with their world centres worked out once (spheres), for many
+  // point tests in a row.
+  _shapeSnapshot(list = this._shapes()) {
+    return list.map((o) => {
+      if (o.kind === 'sphere') { const c = o.obj.localToWorld(o.c.clone()); return { src: o, ball: c, r: o.r }; }
+      if (o.kind === 'ellipsoid') {
+        const s = o.obj.getWorldScale(V()).x || 1;
+        return { src: o, ball: o.obj.getWorldPosition(V()), r: Math.max(o.rad.x, o.rad.y, o.rad.z) * s, inv: o.obj.matrixWorld.clone().invert(), s };
+      }
+      return { src: o, ball: null };
+    });
+  }
+
+  _hitFast(o, p, margin) {
+    const k = o.src.kind;
+    if (k === 'sphere') return p.distanceTo(o.ball) < o.r + margin;
+    if (k === 'ellipsoid') {
+      if (p.distanceTo(o.ball) > o.r + margin) return false;
+      const l = _L.copy(p).applyMatrix4(o.inv), m = margin / o.s, r = o.src.rad;
+      return (l.x / (r.x + m)) ** 2 + (l.y / (r.y + m)) ** 2 + (l.z / (r.z + m)) ** 2 < 1;
+    }
+    return this._hit(o.src, p, margin);
+  }
+
+
+  _armsHitHead() { return this._headHitters().length > 0; }
+
+  // Which arms ('R', 'L') pass through his head or chin.
+  _headHitters() {
+    const head = this._shapeSnapshot(this.selfShapes.filter((o) => o.obj === this.head || o.obj === this.cranium));
+    const out = [];
     for (const k of ['R', 'L']) {
       const arm = this.arms[k];
       const s0 = arm.upper.getWorldPosition(V()), e = arm.fore.getWorldPosition(V()), w = arm.hand.getWorldPosition(V());
-      for (let i = 1; i <= 8; i++) {
-        for (const q of [s0.clone().lerp(e, i / 8), e.clone().lerp(w, i / 8)]) {
-          for (const o of head) if (this._hit(o, q, 0.02)) return true;
+      const hits = () => {
+        for (let i = 1; i <= 8; i++) {
+          for (const q of [s0.clone().lerp(e, i / 8), e.clone().lerp(w, i / 8)]) {
+            for (const o of head) if (this._hitFast(o, q, 0.02)) return true;
+          }
         }
-      }
+        return false;
+      };
+      if (hits()) out.push(k);
     }
-    return false;
+    return out;
   }
 
   gripWorld(key) { return this.arms[key].grip.getWorldPosition(V()); }
@@ -690,19 +905,22 @@ export class Scientist {
 
   // Does the upper arm or forearm pass through anything (himself included)?
   // The first stretch of the upper arm starts inside his shoulder, so skip it.
-  _armHits(arm, wrist) {
+  _armHits(arm, wrist, snap = this._shapeSnapshot()) {
     const s = arm.upper.getWorldPosition(V());
     const e = arm.fore.getWorldPosition(V());
+    const inside = (p, m) => snap.some((o) => this._hitFast(o, p, m));
+    const q = V();
     for (let i = 1; i <= 8; i++) {
       const u = i / 8;
-      if (u > 0.3 && this._inside(s.clone().lerp(e, u), 0.035)) return true;
-      if (i < 8 && this._inside(e.clone().lerp(wrist, u), 0.03)) return true;
+      if (u > 0.3 && inside(q.copy(s).lerp(e, u), 0.035)) return true;
+      if (i < 8 && inside(q.copy(e).lerp(wrist, u), 0.03)) return true;
     }
     return false;
   }
 }
 
 // ------------------------------------------------------------------ IK ----
+const _L = V();
 const _S = V(), _D = V(), _n = V(), _E = V(), _T = V(), _X = V(), _Y = V(), _Z = V();
 const _m4 = new THREE.Matrix4(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qp = new THREE.Quaternion();
 

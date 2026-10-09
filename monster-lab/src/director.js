@@ -5,7 +5,8 @@
 //                        the spec's limb names), each limb is then delivered
 //                        and sewn on, lightning, and the monster leaps off the
 //                        slab onto the lab floor.
-//   summon(def)        – an existing monster charges the camera and screams.
+//   summon(def, {into}) – an existing monster charges the lens and screams
+//                        in close-up, then `into()` switches to its room.
 //   abortCreate()      – the unfinished body is scrapped into the bin.
 //   maybeCleanup()     – overcrowding: bomb, acid, hose (counterparts only).
 //
@@ -15,6 +16,7 @@ import { Patient } from './lab/patient.js';
 import { makeActions } from './lab/actions.js';
 import { SPOTS } from './lab/constants.js';
 import { animateMonster } from './monsters/monsterAnim.js';
+import { faceOf } from './monsters/monsterGen.js';
 import { randomSeed } from './core/rng.js';
 import * as P from './lab/props.js';
 import { titleOf } from './monsters/registry.js';
@@ -32,8 +34,6 @@ const SHOTS = {
   // Pulled back so the floor in front of the scientist (where monsters roam) is in view.
   floor: { target: V(0.55, 0.85, 0.75), dir: V(0.08, 0.34, 1), fitH: 2.5, fitW: 5.6, fov: 32 },
   cleanup: { target: V(0.55, 0.8, 0.9), dir: V(0.05, 0.4, 1), fitH: 2.7, fitW: 6.0, fov: 32 },
-  // Low, eye-level framing for a monster charging at the viewer.
-  summon: { target: V(0.55, 0.9, 2.2), dir: V(0.04, 0.1, 1), fitH: 2.2, fov: 32 },
 };
 
 export class Director {
@@ -50,6 +50,11 @@ export class Director {
     this.reveal = null;
     this.hurry = false;
     this.where = 'idle';
+    this.viewLift = 1; // how much of the lab's raised framing to use (0 = centred)
+    // A warm light by the lens that catches a screaming face (the front of
+    // the room is otherwise dark).
+    this.faceLight = new THREE.PointLight(0xffd8b0, 0, 2.4, 1.6);
+    lab.scene.add(this.faceLight);
     lab.rig.set(SHOTS.idle, { cut: true });
     this.sci.play(this.A.idle());
     this.sci.update(0.2);
@@ -132,26 +137,72 @@ export class Director {
     if (op && !op.born) this.abort({ messageId: op.messageId });
   }
 
-  // An existing assistant answers a lab question: its wandering counterpart
-  // (or a temporary stand-in if it was destroyed) turns, charges and screams.
-  async summon(def) {
+  // A job for a topic that already has a monster: its wandering counterpart
+  // (or a temporary stand-in if it was destroyed) turns, charges the viewer
+  // and screams with its face filling the screen. The camera is pinned at
+  // the monster's eye level and only aims at its face, so the monster grows
+  // as it comes; while it screams the camera pushes in, then dives at the
+  // face and `into()` hands over to the monster's room.
+  async summon(def, { into } = {}) {
     const sci = this.sci;
-    if (this.where === 'idle' && !this.op) {
-      sci.play(this.A.celebrate(2.6, SPOTS.idle));
-    }
-    this._shot('summon', { speed: 2.6 });
+    if (this.where === 'idle' && !this.op) sci.play(this.A.celebrate(2.6, SPOTS.idle));
+    let c = null, face = null;
+    const LENS_Z = 4.4;
+    const focus = V(0.55, 0.9, 2.2);
+    const pos = V(0.6, 0.9, LENS_Z);
+    // Aim at the face every frame (it bobs, lunges and shakes while screaming).
+    const shot = {
+      target: () => {
+        if (c) focus.lerp(faceOf(c.m).pos, 0.3);
+        this.faceLight.position.copy(this.lab.camera.position).add(V(0.15, 0.2, 0));
+        return focus;
+      },
+      pos: () => pos,
+      fov: 32,
+    };
+    const light = this.faceLight;
+    this._tween(1.0, (u) => { light.intensity = 4 * u; });
+    this.viewLift = 0; // centre the face (the lab normally frames higher)
+    const hold = 1.7;
     await this.creatures.summon(
       { seed: def.seed, theme: def.theme, defId: def.id, name: titleOf(def), limbs: def.limbs || [], form: def.form || 1 },
       {
+        hold,
+        onStart: (cc) => {
+          c = cc;
+          // Eye level for this monster, standing.
+          face = faceOf(c.m);
+          const eyeY = THREE.MathUtils.clamp(face.pos.y, 0.25, 2.2);
+          pos.set(0.6, eyeY, LENS_Z);
+          focus.copy(face.pos);
+          this._shot(shot, { speed: 2.4 });
+          // Stop with the whole head comfortably in frame, then lunge in until
+          // it fills about two thirds of the screen while screaming.
+          const gap = Math.hypot(face.pos.x - c.group.position.x, face.pos.z - c.group.position.z); // face sits in front of the feet
+          c.sum.target.set(0.6, 0, LENS_Z - Math.max(0.9, face.r * 9) - gap);
+          c.sum.lunge = V(0.6, 0, LENS_Z - Math.max(0.6, face.r * 6.3) - gap);
+        },
         onScream: () => {
           this.sfx.play('scream');
-          this.lab.rig.shake = 0.6;
+          this.lab.rig.shake = 0.7;
+          this.lab.rig.speed = 5;
+          const lens = pos.clone();
+          this._tween(hold, (u) => {
+            // Push in on the face as it screams, then dive at it.
+            const f = faceOf(c.m).pos;
+            const k = u < 0.72 ? 1 - 0.15 * (u / 0.72) : 0.85 - 0.6 * ((u - 0.72) / 0.28) ** 2;
+            pos.lerpVectors(f, lens, k).setY(THREE.MathUtils.lerp(pos.y, f.y, 0.2));
+          });
+          setTimeout(() => into?.(), (hold - 0.42) * 1000);
         },
-        target: V(0.55, 0, 3.75),
+        target: V(0.6, 0, 2.6),
       },
     );
     if (this.where === 'idle' && !this.op) sci.play(this.A.idle());
-    if (!this.op && !this.cleaning) this._shot(this._idleShot(), { speed: 1.8 });
+    this.viewLift = 1;
+    light.intensity = 0;
+    // The lab is off screen now; be back on the usual framing when it returns.
+    if (!this.op && !this.cleaning) this._shot(this._idleShot(), { cut: true });
   }
 
   complete({ messageId, monsterId }) {

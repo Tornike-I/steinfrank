@@ -8,10 +8,11 @@ import { textures } from '../three/textures.js';
 import { clay, metal, glass, rubber, glossy } from '../three/materials.js';
 import { lumpy, mesh, sausage } from '../three/geom.js';
 import { buildFor } from '../monsters/registry.js';
-import { disposeMonster } from '../monsters/monsterGen.js';
+import { disposeMonster, faceOf } from '../monsters/monsterGen.js';
 import { animateMonster, VERB_FOR_KIND } from '../monsters/monsterAnim.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const RUG_H = 0.03; // the round mat the monster stands on
 
 const MOODS = {
   weather: { wall: 0x4a5a6a, light: 0xcfe0ff, fill: 0x6aa0ff },
@@ -114,8 +115,8 @@ export class Den {
     lamp.add(bulb);
     this.room.add(lamp);
     this.lampG = lamp;
-    const rug = mesh(lumpy(new THREE.CylinderGeometry(0.75, 0.78, 0.03, 28), 0.01, 3, 2), clay(0x6a2a2a, { rough: 1, bump: 3 }), { cast: false });
-    rug.position.y = 0.015;
+    const rug = mesh(lumpy(new THREE.CylinderGeometry(0.75, 0.78, RUG_H, 28), 0.01, 3, 2), clay(0x6a2a2a, { rough: 1, bump: 3 }), { cast: false });
+    rug.position.y = RUG_H / 2;
     this.room.add(rug);
     // Each topic tints only the jar glow; the lamp stays the lab's warm light.
     this.fill.color.set(mood.fill);
@@ -299,14 +300,43 @@ export class Den {
     this.m.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     this.scene.add(this.m.root);
     this.h = this.m.height;
+    this.ground = this._standHeight();
     this.hideBubble();
     this.perform('greet', 2.2);
     this._shot('idle', true);
   }
 
+  // How high the monster must stand so its lowest point rests on top of the
+  // mat (the rug is bumpy, so a hair above its top). Fliers hover anyway.
+  _standHeight() {
+    animateMonster(this.m, 0, { walk: 0, excite: 0 });
+    this.m.root.position.y = 0;
+    this.m.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.m.root, true);
+    const top = RUG_H + 0.016; // lumpy() bumps the mat up to ~1.5 cm
+    return box.min.y < top + 0.05 ? top - box.min.y : 0;
+  }
+
+  // Arriving from a summon: start right in the monster's face (where the lab
+  // left off) and pull back to the usual waist-up framing.
+  enter() {
+    if (!this.m) return;
+    this.m.root.position.y = this.ground;
+    this.m.root.updateMatrixWorld(true);
+    const f = faceOf(this.m);
+    this.rig.set({ target: f.pos.clone(), dir: V(0.03, 0.02, 1), fitH: Math.max(0.3, f.r * 2.6), fov: 30 }, { cut: true });
+    this.perform('greet', 2.2);
+    clearTimeout(this._enterT);
+    this._enterT = setTimeout(() => this.rig.set(this._shots().idle, { speed: 1.5 }), 120);
+  }
+
   _shot(kind, cut = false) {
+    this.rig.set(this._shots()[kind], { speed: 1.8, cut });
+  }
+
+  _shots() {
     const h = this.h || 1;
-    const shots = {
+    return {
       // Waist-up, facing the viewer. The projection is offset (see main.js) so
       // the monster sits in the upper part of the screen above the chat panel.
       idle: { target: V(0.05 * h, h * 0.76, 0), dir: V(0.1, 0.07, 1), fitH: h * 1.8, fov: 30 },
@@ -314,7 +344,6 @@ export class Den {
       work: { target: V(0.05 * h, h * 0.74, 0.05), dir: V(-0.15, 0.12, 1), fitH: h * 1.65, fov: 30 },
       speak: { target: V(0, h * 0.77, 0), dir: V(0.05, 0.06, 1), fitH: h * 1.7, fov: 30 },
     };
-    this.rig.set(shots[kind], { speed: 1.8, cut });
   }
 
   // Play a verb; `dur` makes it temporary, falling back to idle.
@@ -421,8 +450,9 @@ export class Den {
     s.talk = Math.max(0, s.talk - step * 4);
     if (this.voiceLevel) s.talk = Math.max(s.talk, this.voiceLevel());
     animateMonster(this.m, this.t, { ...s, walk: 0, excite: 0 });
-    if (s.verb === 'greet' || s.verb === 'cheer') this.m.root.position.y = Math.abs(Math.sin(this.t * 7)) * 0.05 * this.h * s.verbW;
-    else this.m.root.position.y = 0;
+    const g = this.ground || 0;
+    if (s.verb === 'greet' || s.verb === 'cheer') this.m.root.position.y = g + Math.abs(Math.sin(this.t * 7)) * 0.05 * this.h * s.verbW;
+    else this.m.root.position.y = g;
     if (s.verb === 'think' && Math.random() < 0.15) this.fx.smoke(this._headTop().add(V(0.1, 0.05, 0)), 1, 0xe8e0d0);
   }
 }

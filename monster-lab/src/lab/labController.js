@@ -1,12 +1,15 @@
-// Laboratory controller. Every prompt describes a job; its topic is detected:
-//   - new topic   → Frankenstein forges a monster for it (surgery cinematic)
-//                   and its tab opens. The topic picks the look and voice.
-//   - known topic → that topic's existing monster charges the screen and
-//                   screams, then its existing chat opens.
+// Laboratory controller. Every prompt describes a job, and each topic has
+// exactly one monster (registry.topicForJob):
+//   - new topic   → Frankenstein forges a monster for the topic (surgery
+//                   cinematic) and its tab opens. The topic picks the look
+//                   and voice; the tab is named after the topic.
+//   - known topic → that topic's monster learns the job (Frankenstein
+//                   re-forges it in the background to cover it), charges the
+//                   screen screaming, and its existing chat opens. The
+//                   prompt itself is never sent to the monster.
 // Prompts submitted during cleanup wait until the hose is done.
 import { state, save } from '../core/store.js';
-import { matchTheme, themeOf } from '../monsters/themes.js';
-import { draftAssistant, commitAssistant, allMonsters, titleOf } from '../monsters/registry.js';
+import { draftAssistant, commitAssistant, allMonsters, titleOf, topicForJob, learnJob, topicLabelOf } from '../monsters/registry.js';
 import { limbLabel } from '../monsters/limbParts.js';
 import * as F from '../ai/frankenstein.js';
 import { monsterVoice } from '../audio/monsterVoice.js';
@@ -20,10 +23,30 @@ const VOICE_FOR_TOPIC = {
 };
 const isCzech = (text) => /[ěščřžůťďň]/i.test(text);
 
-function forgeBrief(th, job) {
-  return `Build a monster for this job, described by the user: "${job.replace(/"/g, "'").slice(0, 600)}"
-It will be run again and again for exactly this job. Give it the few simple inputs the job needs, each with a clear description.
-Voice archetype: ${VOICE_FOR_TOPIC[th.id] || 'brute'}.${isCzech(job) ? ' The user writes in Czech: the monster speaks Czech (voice.language "cs").' : ''}`;
+// One assistant per topic, covering every job it has been given so far.
+function forgeBrief(def) {
+  const topic = topicLabelOf(def).toLowerCase();
+  const jobs = (def.jobs?.length ? def.jobs : [def.job]).filter(Boolean).map((j) => `- ${j.replace(/"/g, "'").slice(0, 300)}`).join('\n');
+  return `A ${topic} assistant monster: the one assistant for everything about ${topic}. It is run again and again, each time with whatever the user asks or wants done about ${topic}.
+Inputs: exactly one required string input named "question" (the user's request about ${topic}, maxLength 500).
+It must handle these jobs well (more get added over time):
+${jobs}
+Gather facts with free limbs (web_search, http_fetch) where they help, then compose a short spoken answer and a markdown report.
+Stay on the topic of ${topic}; politely decline anything else.
+Voice archetype: ${VOICE_FOR_TOPIC[def.theme] || 'brute'}.${isCzech(jobs) ? ' The user writes in Czech: the monster speaks Czech (voice.language "cs").' : ''}`;
+}
+
+// Forge and publish a topic monster from Frankenstein; returns the provider.
+async function forgeTopicMonster(def, signal) {
+  const res = await F.forge(forgeBrief(def), signal);
+  if (res.status === 'refused') throw new Error(`Frankenstein refused: ${res.reason}`);
+  if (res.status !== 'draft') throw new Error(`Frankenstein couldn't design it: ${(res.errors || []).slice(0, 2).join('; ') || res.status}`);
+  const card = await F.publish(res.spec.id, WITH_VOICE);
+  return {
+    provider: { kind: 'frankenstein', monsterId: card.id, name: card.name, purpose: card.purpose, inputs: card.inputs, voice: card.has_voice },
+    birthUrl: card.voice?.birth_url || null,
+    limbs: card.limbs,
+  };
 }
 
 // Publish with an ElevenLabs voice agent, sounds and birth scene? VITE_FRANK_VOICE=0 turns it off.
@@ -32,6 +55,7 @@ const WITH_VOICE = import.meta.env.VITE_FRANK_VOICE !== '0';
 export class LabController {
   constructor({ director, creatures, ui, monsters }) {
     this.director = director;
+    this.learning = new Map(); // monster id → { again } while a re-forge runs
     this.creatures = creatures;
     this.ui = ui;
     this.monsters = monsters;
@@ -68,45 +92,46 @@ export class LabController {
   }
 
   async _start(job) {
-    const topic = matchTheme(job);
-    const th = themeOf(topic);
-    const existing = this._existingFor(topic);
+    const found = topicForJob(job);
+    const topic = found.theme;
+    const existing = found.existing;
     if (existing) {
+      const learned = learnJob(existing, job);
+      if (learned) {
+        existing.chat ||= [];
+        existing.chat.push({ id: `note-${Date.now().toString(36)}`, role: 'note', content: `Learned a new job: ${job}` });
+        this._relearn(existing);
+      }
       this.busy = { kind: 'summon', topic };
-      this.ui.banner(`Summoning <b>${escapeHtml(titleOf(existing))}</b>`, { busy: true });
+      this.ui.banner(`<b>${escapeHtml(titleOf(existing))}</b> already exists${learned ? ' — it is learning this job' : ''}`, { busy: true });
       this.ui.renderControls();
-      await this.director.summon(existing);
+      await this.director.summon(existing, { into: () => this._into(existing.id) });
       this.busy = null;
       this.ui.banner(null);
       this.ui.renderControls();
-      this.ui.openMonster(existing.id);
       return;
     }
-    const draft = draftAssistant(topic, job);
+    const draft = draftAssistant(topic, job, found.topic);
     const forgeAbort = new AbortController();
     this.busy = { kind: 'create', topic, draft, forgeAbort };
     const real = F.backend.connected;
-    this.ui.banner(`Building a monster for: <b>${escapeHtml(job.slice(0, 90))}</b>${real ? ' — Frankenstein is designing it…' : ''}`, { busy: true });
+    this.ui.banner(`Creating a <b>${escapeHtml(found.label)}</b> monster${real ? ' — Frankenstein is designing it…' : ''}`, { busy: true });
     this.ui.renderControls();
 
     // Limbs come from Frankenstein's design (or the scripted workflow offline).
     const limbs = real
       ? (async () => {
-        const res = await F.forge(forgeBrief(th, job), forgeAbort.signal);
-        if (res.status === 'refused') throw new Error(`Frankenstein refused: ${res.reason}`);
-        if (res.status !== 'draft') throw new Error(`Frankenstein couldn't design it: ${(res.errors || []).slice(0, 2).join('; ') || res.status}`);
-        const card = await F.publish(res.spec.id, WITH_VOICE);
-        draft.provider = { kind: 'frankenstein', monsterId: card.id, name: card.name, purpose: card.purpose, inputs: card.inputs, voice: card.has_voice };
-        draft.birthUrl = card.voice?.birth_url || null;
-        draft.title = card.name;
-        draft.limbs = card.limbs;
-        return card.limbs;
+        const made = await forgeTopicMonster(draft, forgeAbort.signal);
+        draft.provider = made.provider;
+        draft.birthUrl = made.birthUrl;
+        draft.limbs = made.limbs;
+        return made.limbs;
       })()
       : Promise.resolve(draft.limbs);
     limbs.then((names) => {
       if (this.busy?.draft !== draft) return;
       const list = [...new Set(names.map(limbLabel))];
-      this.ui.banner(`Building <b>${escapeHtml(draft.title || th.label + ' monster')}</b> — sewing on ${list.length} limb${list.length === 1 ? '' : 's'}: ${list.join(', ')}`, { busy: true });
+      this.ui.banner(`Creating a <b>${escapeHtml(found.label)}</b> monster — sewing on ${list.length} limb${list.length === 1 ? '' : 's'}: ${list.join(', ')}`, { busy: true });
     }, () => {});
 
     try {
@@ -127,11 +152,49 @@ export class LabController {
     this.ui.openMonster(a.id);
   }
 
-  // The topic's most recent monster. Unrecognised ("generic") jobs always get
-  // a new monster, since they have nothing in common with each other.
-  _existingFor(topic) {
-    if (topic === 'generic') return null;
-    return allMonsters().filter((m) => m.theme === topic).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0] || null;
+  // From the summon close-up into the monster's room: dip the stage to
+  // black, switch tabs while it's dark, and fade the room in with its camera
+  // pulling back from the face.
+  async _into(id) {
+    await this.ui.fadeStage(1, 380);
+    this.ui.openMonster(id);
+    this.ui.mon?.den?.enter();
+    this.ui.arrive();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    this.ui.fadeStage(0, 750);
+  }
+
+  // A forged monster that learned a job is re-forged in the background to
+  // cover all its jobs; it keeps answering with the old version until the
+  // new one is published. Offline (scripted) monsters already answer the
+  // whole topic, so they only record the job.
+  async _relearn(def) {
+    if (def.provider?.kind !== 'frankenstein' || !F.backend.connected) return;
+    const busy = this.learning.get(def.id);
+    if (busy) { busy.again = true; return; }
+    const entry = { again: false };
+    this.learning.set(def.id, entry);
+    try {
+      do {
+        entry.again = false;
+        const made = await forgeTopicMonster(def);
+        def.provider = made.provider;
+        def.limbs = [...new Set([...(def.limbs || []), ...(made.limbs || [])])];
+        save();
+      } while (entry.again);
+      this._note(def, `Finished learning — now covers ${def.jobs.length} jobs.`);
+    } catch (err) {
+      this._note(def, `Couldn't learn the new job yet (${err?.message || 'forge failed'}); answering as before.`);
+    } finally {
+      this.learning.delete(def.id);
+    }
+  }
+
+  _note(def, content) {
+    def.chat ||= [];
+    def.chat.push({ id: `note-${Date.now().toString(36)}`, role: 'note', content });
+    save();
+    this.ui.renderAll();
   }
 
   stop() {

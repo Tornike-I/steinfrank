@@ -125,6 +125,30 @@ export class ChatUI {
 
   focusInput() { this.el.input.focus(); }
 
+  // Fade the 3D stage to black (to = 1) or back (to = 0); the panels stay.
+  fadeStage(to, ms) {
+    let el = document.getElementById('stage-fade');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'stage-fade';
+      document.getElementById('stage').append(el);
+    }
+    el.style.transitionDuration = `${ms}ms`;
+    el.getBoundingClientRect(); // commit the duration before changing opacity
+    el.style.opacity = String(to);
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  // The monster's room fades in under panels that rise into place.
+  arrive() {
+    const app = this.el.app;
+    app.classList.remove('arriving');
+    void app.offsetWidth;
+    app.classList.add('arriving');
+    clearTimeout(this._arriveT);
+    this._arriveT = setTimeout(() => app.classList.remove('arriving'), 1100);
+  }
+
   // Topic banner over the lab ("Creating a Weather monster").
   banner(html, { busy = false, timeout = 0 } = {}) {
     const b = this.el.banner;
@@ -212,7 +236,7 @@ export class ChatUI {
       const text = document.createElement('span');
       text.className = 'conv-title';
       text.textContent = titleOf(d);
-      text.title = d.job || th.label;
+      text.title = d.jobs?.length ? d.jobs.join('\n') : d.job || th.label;
       const sub = document.createElement('small');
       sub.textContent = d.name;
       text.append(sub);
@@ -271,7 +295,7 @@ export class ChatUI {
 
   _fill(m, row) {
     const body = row.querySelector('.msg-body');
-    if (m.role === 'user') {
+    if (m.role === 'user' || m.role === 'note') {
       body.textContent = m.content;
       return;
     }

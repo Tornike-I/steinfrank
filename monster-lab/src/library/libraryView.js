@@ -80,7 +80,7 @@ export class LibraryView {
       <div class="lib-info">
         <h3>${esc(titleOf(d))}</h3>
         <div class="lib-sub">${esc(d.name)} · ${esc(themeOf(d.theme).label)}</div>
-        <p>${esc(d.job || card?.purpose || d.provider?.purpose || '')}</p>
+        <p>${esc((d.jobs?.length ? d.jobs.join(' · ') : d.job) || card?.purpose || d.provider?.purpose || '')}</p>
         <div class="lib-chips" title="${esc(est ? `Worst case per run, without the spoken verdict: ${usageDetail(est)}` : '')}">${chips.map((c) => `<span>${esc(c)}</span>`).join('')}</div>
         ${tools ? `<div class="lib-tools">${tools}</div>` : ''}
       </div>
