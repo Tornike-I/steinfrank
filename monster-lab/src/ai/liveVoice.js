@@ -13,9 +13,11 @@ const ANNOUNCE = {
 };
 
 export class LiveVoice {
-  constructor({ mon, onChange }) {
+  constructor({ mon, onChange, onCallEnd }) {
     this.mon = mon;
     this.onChange = onChange;
+    this.onCallEnd = onCallEnd;
+    this.startedAt = 0;
     this.conv = null;
     this.monsterId = null;
     this.state = 'off'; // off | connecting | listening | speaking
@@ -37,7 +39,7 @@ export class LiveVoice {
       this.conv = await Conversation.startSession({
         signedUrl,
         clientTools: this._tools(),
-        onConnect: () => this._set('listening'),
+        onConnect: () => { this.startedAt = Date.now(); this._set('listening'); },
         onDisconnect: () => this._ended(),
         onModeChange: ({ mode }) => { if (this.conv) this._set(mode === 'speaking' ? 'speaking' : 'listening'); },
         onError: (e) => console.warn('[voice]', e),
@@ -57,6 +59,8 @@ export class LiveVoice {
   }
 
   _ended() {
+    if (this.startedAt) this.onCallEnd?.(this.monsterId, (Date.now() - this.startedAt) / 1000);
+    this.startedAt = 0;
     this.conv = null;
     monsterVoice.live = null;
     for (const off of this._unfollow) off();

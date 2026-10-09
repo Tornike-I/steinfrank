@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import channels, config, store, watches
+from . import channels, config, pricing, store, watches
 from .forge import pipeline, voice
 from .forge.estimator import estimate, step_estimates
 from .runtime import InputError, Runner
@@ -299,6 +299,11 @@ def list_watches():
 def delete_watch(watch_id: str):
     store.delete_watch(watch_id)
     return {"deleted": watch_id}
+
+
+@app.get("/pricing")
+def get_pricing():
+    return {"voice_call_per_min": pricing.VOICE_CALL_PER_MIN}
 
 
 @app.get("/dev/voice")

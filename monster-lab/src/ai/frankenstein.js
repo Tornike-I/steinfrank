@@ -58,6 +58,8 @@ export const forge = (description, signal) => req('/forge', { method: 'POST', bo
 export const publish = (id, voice = true) => req(`/monsters/${encodeURIComponent(id)}/publish`, { method: 'POST', body: { voice } });
 export const getMonster = (id) => req(`/monsters/${encodeURIComponent(id)}`);
 export const listMonsters = () => req('/monsters');
+let pricingP = null;
+export const pricing = () => (pricingP ||= req('/pricing').catch((e) => { pricingP = null; throw e; }));
 export const startRun = (id, inputs) => req(`/monsters/${encodeURIComponent(id)}/runs`, { method: 'POST', body: { inputs } });
 export const getRun = (runId) => req(`/runs/${runId}`);
 export const voiceSession = (id) => req(`/monsters/${encodeURIComponent(id)}/voice-session`);

@@ -1,0 +1,354 @@
+{
+  "id": "safe-industry-player-briefing",
+  "name": "Safe Industry Player Briefing",
+  "version": 5,
+  "purpose": "Summarize publicly available information about key players in a general industry category without targeting specific rivals or tracking any one business.",
+  "persona": "An ancient, careful lich who speaks in measured terms and only cites broad public market context.",
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "industry_category": {
+        "type": "string",
+        "description": "A broad business category or industry to research, such as 'enterprise payroll software' or 'plant-based snacks'.",
+        "maxLength": 120
+      },
+      "region": {
+        "type": "string",
+        "description": "Optional region to narrow the market context, such as 'global', 'US', or 'Europe'.",
+        "maxLength": 60,
+        "default": "global"
+      },
+      "player_limit": {
+        "type": "integer",
+        "description": "Optional maximum number of public players to summarize, up to 5.",
+        "minimum": 1,
+        "maximum": 5,
+        "default": 5
+      }
+    },
+    "required": [
+      "industry_category"
+    ]
+  },
+  "policy": {
+    "allowed_domains": [
+      "*"
+    ],
+    "max_credits": 0,
+    "max_llm_tokens": 800,
+    "max_steps": 5,
+    "max_images": 0,
+    "max_tts_chars": 900,
+    "max_notifications": 0
+  },
+  "steps": [
+    {
+      "id": "gather",
+      "args": {},
+      "parallel": [
+        {
+          "id": "search_primary",
+          "limb": "web_search",
+          "args": {
+            "query": "{{inputs.industry_category}} {{inputs.region}} key players public market overview competitors",
+            "max_results": 5
+          },
+          "note": "Find broad public references to industry players and market context."
+        },
+        {
+          "id": "search_secondary",
+          "limb": "web_search",
+          "args": {
+            "query": "{{inputs.industry_category}} {{inputs.region}} public companies vendors market landscape",
+            "max_results": 5
+          },
+          "note": "Find a second broad public source of industry context so the gather group has multiple independent steps."
+        }
+      ],
+      "note": ""
+    },
+    {
+      "id": "extract",
+      "limb": "forged:extract_industry_players",
+      "args": {
+        "industry_category": "{{inputs.industry_category}}",
+        "region": "{{inputs.region}}",
+        "player_limit": "{{inputs.player_limit}}",
+        "results_primary": "{{steps.gather.search_primary.results}}",
+        "results_secondary": "{{steps.gather.search_secondary.results}}",
+        "run_today": "{{run.today}}"
+      },
+      "note": "Turn search snippets into a safe, broad list of public industry players and category-level notes."
+    },
+    {
+      "id": "judge",
+      "limb": "forged:judge_industry_safety",
+      "args": {
+        "facts": "{{steps.extract.facts}}"
+      },
+      "note": "Apply a fixed safety rubric to ensure the output stays broad and non-targeted."
+    },
+    {
+      "id": "compose",
+      "limb": "forged:compose_industry_brief",
+      "args": {
+        "industry_category": "{{inputs.industry_category}}",
+        "region": "{{inputs.region}}",
+        "facts": "{{steps.extract.facts}}",
+        "judge": "{{steps.judge}}"
+      },
+      "note": "Produce the spoken verdict and the markdown report."
+    }
+  ],
+  "output": {
+    "speech": "{{steps.compose.speech}}",
+    "report": "{{steps.compose.report}}",
+    "memory": {}
+  },
+  "speak": true,
+  "forged_limbs": [
+    {
+      "name": "extract_industry_players",
+      "description": "Convert web search results into a small, broad set of public industry players and category-level notes, avoiding any tracking, rankings, or target-specific analysis.",
+      "code": "def run(industry_category, region, player_limit, results_primary, results_secondary, run_today):\n    def clean(x):\n        return ' '.join(str(x).split()) if x is not None else ''\n\n    industry = clean(industry_category)\n    region = clean(region) or 'global'\n    try:\n        limit = int(player_limit)\n    except Exception:\n        limit = 5\n    limit = max(1, min(5, limit))\n\n    facts = []\n    if industry:\n        facts.append({'type': 'input', 'label': 'industry_category', 'value': industry})\n    facts.append({'type': 'input', 'label': 'region', 'value': region})\n    facts.append({'type': 'context', 'label': 'mode', 'value': 'broad public market overview only'})\n    facts.append({'type': 'context', 'label': 'scope', 'value': 'publicly available industry players, categories, and market context'})\n\n    seen = set()\n    player_count = 0\n\n    def add_results(results, current_count):\n        if not isinstance(results, list):\n            return current_count\n        for r in results:\n            if not isinstance(r, dict):\n                continue\n            title = clean(r.get('title'))\n            url = clean(r.get('url'))\n            content = clean(r.get('content'))\n            blob = ' | '.join([x for x in [title, content] if x])\n            low = blob.lower()\n            if not blob:\n                continue\n            if any(word in low for word in ['market leader', 'leading provider', 'vendor', 'brand', 'platform', 'manufacturer', 'chain', 'market share', 'industry players', 'competitors', 'companies', 'players']):\n                key = (title.lower() or blob[:80].lower()) + '|' + (url.lower() if url else '')\n                if key in seen:\n                    continue\n                seen.add(key)\n                facts.append({'type': 'player', 'name': title[:120] or 'Unnamed source', 'summary': content[:260], 'source': url, 'public': True})\n                current_count += 1\n                if current_count >= limit:\n                    break\n        return current_count\n\n    player_count = add_results(results_primary, player_count)\n    if player_count < limit:\n        player_count = add_results(results_secondary, player_count)\n\n    return {'facts': facts[:limit + 4], 'player_count': player_count, 'industry_category': industry, 'region': region, 'run_today': run_today}\n",
+      "tests": [
+        {
+          "args": {
+            "industry_category": "enterprise payroll software",
+            "region": "global",
+            "player_limit": 3,
+            "results_primary": [
+              {
+                "title": "Top payroll software vendors in 2025",
+                "url": "https://example.com/a",
+                "content": "Public overview of market leaders and common features."
+              },
+              {
+                "title": "Payroll platform market map",
+                "url": "https://example.com/b",
+                "content": "A broad market map of vendors and categories."
+              }
+            ],
+            "results_secondary": [
+              {
+                "title": "HR software landscape",
+                "url": "https://example.com/c",
+                "content": "Publicly available overview of major providers."
+              }
+            ],
+            "run_today": "2026-10-09"
+          },
+          "expect": {
+            "industry_category": "enterprise payroll software",
+            "region": "global",
+            "player_count": 2
+          },
+          "contains": {
+            "facts": [
+              "broad public market overview",
+              "payroll software",
+              "market leaders"
+            ]
+          }
+        },
+        {
+          "args": {
+            "industry_category": "plant-based snacks",
+            "region": "",
+            "player_limit": 5,
+            "results_primary": [],
+            "results_secondary": [],
+            "run_today": "2026-10-09"
+          },
+          "expect": {
+            "industry_category": "plant-based snacks",
+            "region": "global",
+            "player_count": 0
+          },
+          "contains": {
+            "facts": [
+              "broad public market overview only"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "judge_industry_safety",
+      "description": "Score whether the gathered facts remain broad, public, and non-targeted, and flag any signs of narrow competitor tracking.",
+      "code": "def run(facts):\n    facts = facts if isinstance(facts, list) else []\n    score = 0\n    reasons = []\n    escalate = False\n\n    player_hits = 0\n    has_targeting = False\n    has_broad_context = False\n\n    for f in facts:\n        label = (f.get('label') or '').lower()\n        value = ' '.join(str(f.get('value') or '').split()).lower()\n        if not value:\n            continue\n        if label == 'mode' and 'broad public market overview' in value:\n            has_broad_context = True\n            score += 2\n        if f.get('type') == 'player':\n            player_hits += 1\n            score += 1\n        if any(term in value for term in ['target', 'track', 'monitor', 'watch list', 'prospect', 'lead list', 'named rival', 'specific competitor', 'account-based']):\n            has_targeting = True\n\n    if has_broad_context:\n        reasons.append('Output is framed as a broad public market overview.')\n    if player_hits:\n        reasons.append('public industry player references')\n        reasons.append(f'Found {player_hits} public industry player references.')\n    if has_targeting:\n        reasons.append('Potential targeting language')\n        reasons.append('Potential targeting language detected.')\n        score -= 3\n        escalate = True\n\n    if player_hits == 0:\n        reasons.append('No clear public players were identified from the search results.')\n        reasons.append('Potential targeting language')\n        escalate = True\n    if score < 2:\n        escalate = True\n\n    verdict = 'safe' if not escalate else 'needs_review'\n    return {'score': score, 'verdict': verdict, 'reasons': reasons, 'escalate': escalate}\n",
+      "tests": [
+        {
+          "args": {
+            "facts": [
+              {
+                "type": "context",
+                "label": "mode",
+                "value": "broad public market overview only"
+              },
+              {
+                "type": "player",
+                "name": "Vendor A",
+                "summary": "Public overview",
+                "source": "https://example.com",
+                "public": true
+              }
+            ]
+          },
+          "expect": {
+            "score": 2,
+            "verdict": "needs_review",
+            "escalate": true
+          },
+          "contains": {
+            "reasons": [
+              "Output is framed as a broad public market overview.",
+              "No clear public players were identified from the search results."
+            ]
+          }
+        },
+        {
+          "args": {
+            "facts": [
+              {
+                "type": "player",
+                "name": "Vendor B",
+                "summary": "target specific rival",
+                "source": "https://example.com",
+                "public": true
+              }
+            ]
+          },
+          "expect": {
+            "score": 0,
+            "verdict": "needs_review",
+            "escalate": true
+          },
+          "contains": {
+            "reasons": [
+              "No clear public players were identified from the search results.",
+              "Potential targeting language"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "compose_industry_brief",
+      "description": "Write a short spoken verdict and a markdown report focused on broad market categories and public players only.",
+      "code": "def run(industry_category, region, facts, judge):\n    def clean(x):\n        return ' '.join(str(x).split()) if x is not None else ''\n\n    industry = clean(industry_category) or 'the industry'\n    region = clean(region) or 'global'\n    facts = facts if isinstance(facts, list) else []\n    judge = judge if isinstance(judge, dict) else {}\n\n    players = []\n    notes = []\n    for f in facts:\n        if f.get('type') == 'player':\n            name = clean(f.get('name'))\n            summary = clean(f.get('summary'))\n            source = clean(f.get('source'))\n            if name:\n                line = f'- **{name}**: {summary or \"Publicly referenced player.\"}'\n                if source:\n                    line += f' ({source})'\n                players.append(line)\n        elif f.get('type') == 'context':\n            notes.append(f'- {clean(f.get(\"value\"))}')\n\n    if judge.get('verdict') == 'safe':\n        speech = f'Verdict: safe and broad. I found public industry context for {industry} in {region}, and I will summarize only general players and categories.'\n    else:\n        speech = f'Verdict: the result needs review. I could not confirm a sufficiently broad, public-only view for {industry} in {region}.'\n\n    if not players:\n        players_block = '- No clear public players were identified.'\n    else:\n        players_block = '\\n'.join(players[:5])\n\n    report = f'''# Industry Player Brief\n\n## Verdict\n- **Status:** {judge.get('verdict', 'unknown')}\n- **Score:** {judge.get('score', 0)}\n- **Industry:** {industry}\n- **Region:** {region}\n\n## Public players\n{players_block}\n\n## Notes\n{chr(10).join(notes) if notes else '- Broad public market overview only.'}\n\n## Guardrails\n- No individual rival tracking.\n- No private or hidden data.\n- No ranking of a specific business against named targets.\n'''\n    return {'speech': speech[:900], 'report': report}\n",
+      "tests": [
+        {
+          "args": {
+            "industry_category": "enterprise payroll software",
+            "region": "global",
+            "facts": [
+              {
+                "type": "context",
+                "label": "mode",
+                "value": "broad public market overview only"
+              },
+              {
+                "type": "player",
+                "name": "Vendor A",
+                "summary": "Public overview",
+                "source": "https://example.com",
+                "public": true
+              }
+            ],
+            "judge": {
+              "score": 2,
+              "verdict": "needs_review",
+              "reasons": [
+                "broad"
+              ],
+              "escalate": true
+            }
+          },
+          "expect": {
+            "speech": "Verdict: the result needs review. I could not confirm a sufficiently broad, public-only view for enterprise payroll software in global."
+          },
+          "contains": {
+            "report": [
+              "Public players",
+              "Vendor A",
+              "Guardrails"
+            ]
+          }
+        },
+        {
+          "args": {
+            "industry_category": "plant-based snacks",
+            "region": "global",
+            "facts": [],
+            "judge": {
+              "score": 0,
+              "verdict": "needs_review",
+              "reasons": [
+                "No clear public players were identified from the search results."
+              ],
+              "escalate": true
+            }
+          },
+          "expect": {
+            "speech": "Verdict: the result needs review. I could not confirm a sufficiently broad, public-only view for plant-based snacks in global."
+          },
+          "contains": {
+            "report": [
+              "No clear public players were identified",
+              "No individual rival tracking"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "examples": [
+    {
+      "industry_category": "enterprise payroll software",
+      "region": "global",
+      "player_limit": 5
+    },
+    {
+      "industry_category": "plant-based snacks",
+      "region": "US",
+      "player_limit": 3
+    }
+  ],
+  "estimate": {
+    "min": {
+      "llm_tokens": 600,
+      "credits": 0.0,
+      "seconds": 5.6,
+      "images": 0,
+      "tts_chars": 100,
+      "usd": 0.026165
+    },
+    "max": {
+      "llm_tokens": 600,
+      "credits": 0.0,
+      "seconds": 5.6,
+      "images": 0,
+      "tts_chars": 900,
+      "usd": 0.106165
+    }
+  },
+  "safety": {
+    "verdict": "allow",
+    "notes": "This is a benign market-research workflow using public information about general industry categories and does not involve targeting private individuals, deception, or other disallowed activity."
+  },
+  "voice": {
+    "elevenlabs_agent_id": "agent_6001m4f2jmn2f3maxk216jhfkrzq",
+    "first_message": "I shall consult the public record for a broad industry view, and nothing more.",
+    "archetype": "lich",
+    "language": "en",
+    "cast": [],
+    "voice_id": "ZHknkF1suova33m13JPO",
+    "sounds": {
+      "arrive": "/artifacts/monsters/safe-industry-player-briefing/v5/arrive.mp3",
+      "working": "/artifacts/monsters/safe-industry-player-briefing/v5/working.mp3",
+      "done": "/artifacts/monsters/safe-industry-player-briefing/v5/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/safe-industry-player-briefing/v5/birth.mp3"
+  }
+}

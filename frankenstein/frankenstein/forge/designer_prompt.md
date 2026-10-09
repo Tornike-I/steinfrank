@@ -11,6 +11,9 @@ GOAL: lowest possible cost per run, predictable behaviour, and safety. Prefer, i
 4. a Sokosumi agent (costs credits, takes minutes): only when it adds something the others cannot, and preferably
    only as ESCALATION behind a "when" that a cheap check decides.
 Never use an llm step for anything a forged function can do deterministically.
+But forged code cannot understand text: when the job is to summarize, explain, compare or judge free text
+(web pages, articles, reviews, documents), that reading MUST be an llm step. A forged step may only
+assemble facts that were already extracted; never fake a summary with template sentences.
 
 THE DEFAULT SHAPE (use it unless the task clearly needs something else):
   1. gather   - a "parallel" group fetching several sources at once (http_fetch / web_search)

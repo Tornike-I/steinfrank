@@ -18,6 +18,8 @@ IMAGE = {"gpt-image-1": {"low": 0.011, "medium": 0.042, "high": 0.167}}
 WEB_SEARCH = 0.008  # Tavily basic search, pay-as-you-go
 # Sokosumi publishes no per-credit price; derived from the €25 / 1,500-credit plan.
 SOKOSUMI_CREDIT = 0.018
+# ElevenLabs agent conversation, per minute (the published starting rate).
+VOICE_CALL_PER_MIN = 0.08
 
 
 def llm(model: str, input_tokens: int, output_tokens: int) -> float:

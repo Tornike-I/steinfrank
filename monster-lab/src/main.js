@@ -85,7 +85,7 @@ const director = new Director({
 const wf = new WorkflowView(document.getElementById('workflow'));
 const menagerie = new Menagerie();
 const mon = new MonsterController({ den, ui, wf });
-const voice = new LiveVoice({ mon, onChange: () => ui.renderControls() });
+const voice = new LiveVoice({ mon, onChange: () => ui.renderControls(), onCallEnd: (id, secs) => mon.noteCall(id, secs) });
 mon.onSelect = (id) => { if (voice.state !== 'off' && voice.monsterId !== id) voice.stop(); };
 ctrl = new LabController({ director, creatures, ui, monsters: mon });
 const library = new LibraryView(document.getElementById('library'), { menagerie, open: (id) => ui.openMonster(id), thumbnail: (def) => thumbnail(def) });

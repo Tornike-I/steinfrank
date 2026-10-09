@@ -8,6 +8,8 @@ import { uid } from '../core/rng.js';
 import { getMonster, allMonsters } from '../monsters/registry.js';
 import { respond, frankensteinSpec } from '../ai/assistants.js';
 import { monsterVoice } from '../audio/monsterVoice.js';
+import * as F from '../ai/frankenstein.js';
+import { usd } from '../core/money.js';
 
 export class MonsterController {
   constructor({ den, ui, wf }) {
@@ -103,6 +105,20 @@ export class MonsterController {
     if (!msg) return false;
     this.decide(msg.id, approve);
     return true;
+  }
+
+  // A finished live voice call, with its length and what ElevenLabs bills for it.
+  async noteCall(defId, seconds) {
+    const def = getMonster(defId);
+    if (!def || seconds < 1) return;
+    let rate = null;
+    try { rate = (await F.pricing()).voice_call_per_min; } catch { /* offline: no price */ }
+    const len = `${Math.floor(seconds / 60)}m ${String(Math.round(seconds % 60)).padStart(2, '0')}s`;
+    const cost = rate ? ` · ≈${usd((seconds / 60) * rate)} (ElevenLabs, ${usd(rate)}/min)` : '';
+    def.chat ||= [];
+    def.chat.push({ id: uid('a'), role: 'assistant', content: `_🎙 Voice call · ${len}${cost}_`, status: 'complete' });
+    save();
+    if (state.mode === 'monsters' && this.def?.id === defId) this.ui.renderAll();
   }
 
   regenerate(msgId) {
