@@ -104,6 +104,9 @@ class HttpFetchLimb(Limb):
 
     async def _fetch(self, args, ctx):
         url = str(args["url"]).strip()
+        # Users type "amazon.com"; a missing scheme would otherwise read as an unreachable site.
+        if url and "://" not in url:
+            url = "https://" + url.lstrip("/")
         max_chars = int(args.get("max_chars") or 12000)
         async with httpx.AsyncClient(timeout=20, headers={"User-Agent": config.USER_AGENT}) as client:
             for _ in range(MAX_REDIRECTS + 1):

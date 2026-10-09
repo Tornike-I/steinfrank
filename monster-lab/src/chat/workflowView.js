@@ -116,8 +116,9 @@ export class WorkflowView {
     const { rows, estimates, speaks } = this._rows(def);
     const run = this.live.get(def.id);
     let total = {};
-    for (const s of [...(run?.steps.values() || []), { usage: run?.speechUsage }]) total = addUsage(total, s.usage);
-    const estTotal = Object.values(estimates).reduce((a, u) => addUsage(a, u), {});
+    // The spoken verdict is a delivery cost, not the workflow's: it is shown on its own box only.
+    for (const s of run?.steps.values() || []) total = addUsage(total, s.usage);
+    const estTotal = Object.entries(estimates).filter(([k]) => k !== 'speech').reduce((a, [, u]) => addUsage(a, u), {});
     const head = run?.steps.size ? `this run: ${costText(total)}` : rows.length ? `per run: ${costText(estTotal, true)}` : '';
 
     const box = (b) => {
@@ -135,7 +136,7 @@ export class WorkflowView {
       </div>`;
     };
     const speakRow = speaks
-      ? `<div class="wf-row"><div class="wf-box" data-state="${run?.speech || 'idle'}"><div class="wf-icon">📯</div><div class="wf-text"><b>Speak the verdict</b><span class="wf-note">Rewritten for listening, then voiced</span><small>LLM · OpenAI → Voice · ElevenLabs</small></div>${run?.speechUsage ? costHtml(run.speechUsage) : costHtml(estimates.speech, true)}</div></div>`
+      ? `<div class="wf-row"><div class="wf-box" data-state="${run?.speech || 'idle'}"><div class="wf-icon">📯</div><div class="wf-text"><b>Speak the verdict</b><span class="wf-note">Rewritten for listening, then voiced · not in the total</span><small>LLM · OpenAI → Voice · ElevenLabs</small></div>${run?.speechUsage ? costHtml(run.speechUsage) : costHtml(estimates.speech, true)}</div></div>`
       : '';
     const body = rows.length
       ? rows.map((row) => `<div class="wf-row${row.length > 1 ? ' wf-par' : ''}">${row.map(box).join('')}</div>`).join('') + speakRow

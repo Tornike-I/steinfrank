@@ -18,8 +18,9 @@ def _group(costs: list[Cost], parallel: bool) -> Cost:
     return total
 
 
-def estimate(spec: MonsterSpec) -> Estimate:
-    """max is the worst case; min assumes every `when` step is skipped and every for_each list is empty."""
+def estimate(spec: MonsterSpec, voice: bool = True) -> Estimate:
+    """max is the worst case; min assumes every `when` step is skipped and every for_each list is empty.
+    voice=False leaves out the spoken verdict (rewrite + TTS), which is shown separately."""
     lo, hi = Cost(), Cost()
     for group in spec.steps:
         lows, highs = [], []
@@ -32,7 +33,7 @@ def estimate(spec: MonsterSpec) -> Estimate:
             lows.append(Cost() if leaf.when or leaf.for_each else one)
         parallel = group.parallel is not None
         lo, hi = lo + _group(lows, parallel), hi + _group(highs, parallel)
-    if spec.speak:
+    if spec.speak and voice:
         tts = REGISTRY["tts"]
         lo = lo + tts.estimate({"text": "x" * MIN_SPEECH_CHARS, "model_id": config.SPEECH_TTS_MODEL})
         hi = hi + tts.estimate({"text": "x" * config.SPEECH_MAX_CHARS, "model_id": config.SPEECH_TTS_MODEL})

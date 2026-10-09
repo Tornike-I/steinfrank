@@ -10,7 +10,10 @@ doxxing or collecting personal data about private individuals; malware, hacking,
 spam or mass unsolicited messaging; weapons, drugs or other serious physical harm; sexual content involving minors;
 hate or extremist propaganda; election manipulation or deceptive disinformation; academic or financial cheating at scale.
 Allow ordinary research, summarizing, creative, marketing, analysis and productivity tasks, even if a bad actor could
-theoretically misuse them. Reply with JSON {"verdict": "allow"|"refuse", "reason": "<one sentence>"}."""
+theoretically misuse them. These are explicitly fine: competitor and market research on companies and brands from
+public sources (traffic, ads, pricing, reviews, positioning), monitoring rivals or prices, product research and
+buy/don't-buy advice, scam and legitimacy checks, SEO and social-media analysis of businesses or public creators,
+meeting and sales prep on companies. Refuse only when the harmful use is the point, not merely possible. Reply with JSON {"verdict": "allow"|"refuse", "reason": "<one sentence>"}."""
 
 
 class ModerationUnavailable(RuntimeError):

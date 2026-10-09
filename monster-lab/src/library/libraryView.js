@@ -71,7 +71,7 @@ export class LibraryView {
     const card = this.cards.get(d.provider?.monsterId);
     const chips = [`${PLAN[body.plan] || body.plan}${body.size !== 'normal' ? ` · ${body.size}` : ''}`];
     if (card?.voice?.archetype) chips.push(`🗣 ${card.voice.archetype}${card.voice.language === 'cs' ? ' · čeština' : ''}`);
-    const est = card?.estimate?.max;
+    const est = (card?.workflow_estimate || card?.estimate)?.max;
     if (est) chips.push(est.usd ? `≤${usd(est.usd)} / run` : 'free to run');
     if (d.provider?.kind !== 'frankenstein') chips.push('simulated');
     const tools = [...new Set((d.limbs || []).map((l) => limbKind(l)))].map((k) => `<span title="${esc((TOOL[k] || TOOL.other).tool)}">${(TOOL[k] || TOOL.other).icon}</span>`).join('');
@@ -81,7 +81,7 @@ export class LibraryView {
         <h3>${esc(titleOf(d))}</h3>
         <div class="lib-sub">${esc(d.name)} · ${esc(themeOf(d.theme).label)}</div>
         <p>${esc(d.job || card?.purpose || d.provider?.purpose || '')}</p>
-        <div class="lib-chips" title="${esc(est ? `Worst case per run: ${usageDetail(est)}` : '')}">${chips.map((c) => `<span>${esc(c)}</span>`).join('')}</div>
+        <div class="lib-chips" title="${esc(est ? `Worst case per run, without the spoken verdict: ${usageDetail(est)}` : '')}">${chips.map((c) => `<span>${esc(c)}</span>`).join('')}</div>
         ${tools ? `<div class="lib-tools">${tools}</div>` : ''}
       </div>
     </button>`;

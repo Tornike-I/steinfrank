@@ -94,7 +94,7 @@ def _observed(monster_id: str) -> dict | None:
 def _card(spec) -> dict:
     return {
         "id": spec.id, "name": spec.name, "version": spec.version, "purpose": spec.purpose,
-        "inputs": spec.inputs, "estimate": estimate(spec).model_dump(), "observed": _observed(spec.id),
+        "inputs": spec.inputs, "estimate": estimate(spec).model_dump(), "workflow_estimate": estimate(spec, voice=False).model_dump(), "observed": _observed(spec.id),
         "limbs": sorted({s.limb for s in spec.leaves()}), "has_voice": bool(spec.voice.elevenlabs_agent_id),
         "voice": spec.voice.model_dump(include={"archetype", "language", "sounds", "birth_url"}),
     }

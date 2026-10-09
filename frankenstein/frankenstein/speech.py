@@ -12,6 +12,8 @@ PROMPT = """Rewrite a result so it sounds natural when a voice assistant reads i
 Keep every fact, name and number; do not add anything. Verdict first, 2-5 short plain sentences.
 No URLs, file paths, markdown, code, symbols, emoji or raw error text: say a web address as a person
 would ("example dot com"), round long numbers and say units in words. Reply in the language of the result.
+If the main data the result is about is missing (n/a, no data returned, fetch errors), start with that
+("I couldn't get the forecast for London") and drop any "ready", "all good" or other confident verdict.
 Reply with JSON {"speech": "..."}."""
 
 
