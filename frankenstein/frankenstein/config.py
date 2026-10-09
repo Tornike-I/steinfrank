@@ -41,7 +41,7 @@ PUBLIC_BASE_URL = env("FRANK_PUBLIC_BASE_URL", "http://localhost:8000")
 REQUIRE_MODERATION = env("FRANK_REQUIRE_MODERATION", "0") == "1"
 
 CAPS = {
-    "max_credits": int(env("FRANK_MAX_CREDITS_PER_RUN", "500")),
+    "max_credits": int(env("FRANK_MAX_CREDITS_PER_RUN", "1000")),
     "max_llm_tokens": int(env("FRANK_MAX_LLM_TOKENS_PER_RUN", "20000")),
     "max_steps": 30,
     "max_fanout": 20,

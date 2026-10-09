@@ -1,0 +1,540 @@
+{
+  "id": "amazon-buy-or-wait-hag",
+  "name": "Amazon Buy or Wait Hag",
+  "version": 1,
+  "purpose": "Decide whether an Amazon product is worth buying by checking the product page, independent reviews, alternatives, and targeted escalation when needed.",
+  "persona": "A sly swamp witch who distrusts glossy claims and tells the truth plainly.",
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "amazon_url": {
+        "type": "string",
+        "description": "Amazon product URL to evaluate.",
+        "maxLength": 500
+      },
+      "budget_usd": {
+        "type": "number",
+        "description": "Optional budget ceiling for comparison, in dollars.",
+        "default": 100
+      },
+      "country": {
+        "type": "string",
+        "description": "Optional market country code for web searches.",
+        "maxLength": 10,
+        "default": "US"
+      }
+    },
+    "required": [
+      "amazon_url"
+    ]
+  },
+  "policy": {
+    "allowed_domains": [
+      "amazon.com",
+      "www.amazon.com",
+      "smile.amazon.com"
+    ],
+    "max_credits": 760,
+    "max_llm_tokens": 800,
+    "max_steps": 9,
+    "max_images": 0,
+    "max_tts_chars": 900,
+    "max_notifications": 0
+  },
+  "steps": [
+    {
+      "id": "gather",
+      "args": {},
+      "parallel": [
+        {
+          "id": "product_page",
+          "limb": "http_fetch",
+          "args": {
+            "url": "{{inputs.amazon_url}}",
+            "max_chars": 12000,
+            "allow_errors": true
+          },
+          "note": "Fetch the Amazon product page."
+        },
+        {
+          "id": "independent_reviews",
+          "limb": "web_search",
+          "args": {
+            "query": "{{inputs.amazon_url}} independent reviews ratings complaints",
+            "max_results": 5
+          },
+          "note": "Find independent reviews and criticism."
+        },
+        {
+          "id": "alternatives",
+          "limb": "web_search",
+          "args": {
+            "query": "{{inputs.amazon_url}} cheaper alternatives similar products",
+            "max_results": 5
+          },
+          "note": "Find cheaper alternatives in parallel."
+        }
+      ],
+      "note": "Gather the product page, reviews, and alternatives together."
+    },
+    {
+      "id": "extract",
+      "limb": "forged:extract_amazon_buy_facts",
+      "args": {
+        "amazon_url": "{{inputs.amazon_url}}",
+        "budget_usd": "{{inputs.budget_usd}}",
+        "country": "{{inputs.country}}",
+        "product_page": "{{steps.gather.product_page}}",
+        "independent_reviews": "{{steps.gather.independent_reviews}}",
+        "alternatives": "{{steps.gather.alternatives}}"
+      },
+      "note": "Pull out price, title, signals, and candidate alternatives."
+    },
+    {
+      "id": "verify",
+      "limb": "forged:verify_amazon_buy_data",
+      "args": {
+        "product_page": "{{steps.gather.product_page}}",
+        "extracted": "{{steps.extract}}"
+      },
+      "note": "Verify the data really arrived before any judgment."
+    },
+    {
+      "id": "judge",
+      "limb": "forged:judge_amazon_buy",
+      "args": {
+        "extracted": "{{steps.extract}}",
+        "verify": "{{steps.verify}}"
+      },
+      "note": "Score the deal and decide whether escalation is needed."
+    },
+    {
+      "id": "product_reality_check",
+      "limb": "sokosumi",
+      "args": {
+        "agent_id": "cmmtegidk000o04jydnl2xrqg",
+        "inputs": {
+          "amazon_url": "{{inputs.amazon_url}}",
+          "prompt": "Compare the marketing claims on this Amazon product page with real customer reviews. Focus on whether the claims seem inflated, misleading, or supported by reviews, and summarize the main risks and positives."
+        },
+        "max_credits": 60
+      },
+      "when": "steps.judge.escalate == true",
+      "note": "Hire the Amazon product reality check agent when the price is high or signals disagree."
+    },
+    {
+      "id": "reddit_research",
+      "limb": "sokosumi",
+      "args": {
+        "agent_id": "cmnd7488u000607ii27du59fa",
+        "inputs": {
+          "research_topic": "{{steps.extract.product_title}}",
+          "brand_focus": "{{steps.extract.brand}}",
+          "time_range": "all",
+          "seed_subreddits": "r/amazon, r/BuyItForLife, r/ConsumerAdvice"
+        },
+        "max_credits": 700
+      },
+      "when": "steps.judge.escalate == true",
+      "note": "Only add Reddit sentiment when the price is high or the cheap signals disagree."
+    },
+    {
+      "id": "compose",
+      "limb": "forged:compose_amazon_buy_verdict",
+      "args": {
+        "amazon_url": "{{inputs.amazon_url}}",
+        "budget_usd": "{{inputs.budget_usd}}",
+        "extracted": "{{steps.extract}}",
+        "verify": "{{steps.verify}}",
+        "judge": "{{steps.judge}}",
+        "product_reality_check": "{{steps.product_reality_check}}",
+        "reddit_research": "{{steps.reddit_research}}"
+      },
+      "note": "Produce the spoken buy/wait/pick-an-alternative verdict and report."
+    }
+  ],
+  "output": {
+    "speech": "{{steps.compose.speech}}",
+    "report": "{{steps.compose.report}}",
+    "memory": {}
+  },
+  "speak": true,
+  "forged_limbs": [
+    {
+      "name": "extract_amazon_buy_facts",
+      "description": "Extract product facts, price, review signals, and alternative candidates from an Amazon page and search results without guessing when fields are missing.",
+      "code": "def run(amazon_url, budget_usd, country, product_page, independent_reviews, alternatives):\n    def clean(x):\n        return ' '.join(str(x).split()) if x is not None else ''\n\n    def num(x):\n        try:\n            return float(x)\n        except Exception:\n            return None\n\n    page = product_page if isinstance(product_page, dict) else {}\n    title = clean(page.get('title'))\n    text = clean(page.get('text'))\n    url = clean(page.get('url')) or clean(amazon_url)\n    status = page.get('status')\n\n    price = None\n    if isinstance(text, str) and text:\n        import re\n        m = re.search(r'\\$(\\d+(?:\\.\\d{1,2})?)', text)\n        if m:\n            price = num(m.group(1))\n        if price is None:\n            m = re.search(r'([0-9]+(?:\\.[0-9]{1,2})?)\\s*dollars', text, re.I)\n            if m:\n                price = num(m.group(1))\n\n    brand = ''\n    if title:\n        brand = title.split()[0]\n\n    review_signals = []\n    review_count = None\n    if isinstance(text, str):\n        low = text.lower()\n        for phrase in ['works great', 'highly recommend', 'bad quality', 'stopped working', 'poor quality', 'fake', 'scam', 'not worth']:\n            if phrase in low:\n                review_signals.append(phrase)\n        import re\n        m = re.search(r'([0-9,]+)\\s+ratings?', text, re.I)\n        if m:\n            try:\n                review_count = int(m.group(1).replace(',', ''))\n            except Exception:\n                pass\n\n    indie_hits = []\n    if isinstance(independent_reviews, dict):\n        for r in independent_reviews.get('results', [])[:5]:\n            if isinstance(r, dict):\n                indie_hits.append({'title': clean(r.get('title'))[:160], 'url': clean(r.get('url')), 'snippet': clean(r.get('content'))[:260]})\n\n    alt_hits = []\n    if isinstance(alternatives, dict):\n        for r in alternatives.get('results', [])[:5]:\n            if isinstance(r, dict):\n                alt_hits.append({'title': clean(r.get('title'))[:160], 'url': clean(r.get('url')), 'snippet': clean(r.get('content'))[:260]})\n\n    cheap_signals_disagree = False\n    if review_signals:\n        bad = any(s in review_signals for s in ['bad quality', 'stopped working', 'poor quality', 'fake', 'scam', 'not worth'])\n        good = any(s in review_signals for s in ['works great', 'highly recommend'])\n        cheap_signals_disagree = bad and good\n\n    return {\n        'product_title': title,\n        'brand': brand,\n        'url': url,\n        'status': status,\n        'price': price,\n        'currency': 'USD',\n        'review_count': review_count,\n        'review_signals': review_signals[:6],\n        'independent_reviews': indie_hits,\n        'alternatives': alt_hits,\n        'cheap_signals_disagree': cheap_signals_disagree,\n        'page_text_sample': text[:1200],\n        'budget_usd': budget_usd\n    }\n",
+      "tests": [
+        {
+          "args": {
+            "amazon_url": "https://www.amazon.com/dp/example",
+            "budget_usd": 100,
+            "country": "US",
+            "product_page": {
+              "status": 200,
+              "url": "https://www.amazon.com/dp/example",
+              "title": "Widget Pro",
+              "text": "Widget Pro $129.99 12,345 ratings works great but some say poor quality"
+            },
+            "independent_reviews": {
+              "results": [
+                {
+                  "title": "Review site",
+                  "url": "https://review.example",
+                  "content": "mixed results"
+                }
+              ]
+            },
+            "alternatives": {
+              "results": [
+                {
+                  "title": "Cheaper Widget",
+                  "url": "https://alt.example",
+                  "content": "similar features"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "product_title": "Widget Pro",
+            "brand": "Widget",
+            "price": 129.99,
+            "currency": "USD",
+            "review_count": 12345,
+            "cheap_signals_disagree": true,
+            "budget_usd": 100
+          },
+          "contains": {
+            "review_signals": [
+              "works great",
+              "poor quality"
+            ],
+            "independent_reviews": [
+              "mixed results"
+            ],
+            "alternatives": [
+              "similar features"
+            ]
+          }
+        },
+        {
+          "args": {
+            "amazon_url": "https://www.amazon.com/dp/example",
+            "budget_usd": 100,
+            "country": "US",
+            "product_page": {
+              "status": 200,
+              "url": "https://www.amazon.com/dp/example",
+              "title": "Gadget Mini",
+              "text": "Gadget Mini $49.00 250 ratings"
+            },
+            "independent_reviews": {
+              "results": []
+            },
+            "alternatives": {
+              "results": []
+            }
+          },
+          "expect": {
+            "product_title": "Gadget Mini",
+            "price": 49.0,
+            "cheap_signals_disagree": false,
+            "budget_usd": 100
+          },
+          "contains": {
+            "review_signals": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify_amazon_buy_data",
+      "description": "Verify that the Amazon page fetch succeeded and that the extracted data contains the minimum required fields to support a safe verdict.",
+      "code": "def run(product_page, extracted):\n    page = product_page if isinstance(product_page, dict) else {}\n    extracted = extracted if isinstance(extracted, dict) else {}\n    problems = []\n\n    if page.get('status') != 200:\n        problems.append('Amazon page did not return HTTP 200.')\n    text = page.get('text') or ''\n    if not isinstance(text, str) or not text.strip():\n        problems.append('Amazon page text was empty.')\n    if not extracted.get('product_title'):\n        problems.append('Product title could not be extracted.')\n    if extracted.get('price') is None:\n        problems.append('Price could not be extracted.')\n    if not extracted.get('url'):\n        problems.append('Product URL is missing.')\n    return {'ok': len(problems) == 0, 'problems': problems}\n",
+      "tests": [
+        {
+          "args": {
+            "product_page": {
+              "status": 200,
+              "text": "hello"
+            },
+            "extracted": {
+              "product_title": "X",
+              "price": 10,
+              "url": "u"
+            }
+          },
+          "expect": {
+            "ok": true
+          },
+          "contains": {
+            "problems": []
+          }
+        },
+        {
+          "args": {
+            "product_page": {
+              "status": 404,
+              "text": ""
+            },
+            "extracted": {
+              "product_title": "",
+              "price": null,
+              "url": ""
+            }
+          },
+          "expect": {
+            "ok": false
+          },
+          "contains": {
+            "problems": [
+              "HTTP 200",
+              "empty",
+              "title",
+              "Price could not be extracted",
+              "URL is missing"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "judge_amazon_buy",
+      "description": "Apply a fixed buy/wait/pick-an-alternative rubric from price, verification, review signals, and whether independent sources disagree.",
+      "code": "def run(extracted, verify):\n    extracted = extracted if isinstance(extracted, dict) else {}\n    verify = verify if isinstance(verify, dict) else {}\n    ok = bool(verify.get('ok'))\n    price = extracted.get('price')\n    budget = extracted.get('budget_usd')\n    if budget is None:\n        budget = 100\n    try:\n        budget = float(budget)\n    except Exception:\n        budget = 100\n    reasons = []\n    score = 0\n    escalate = False\n    verdict = 'wait'\n\n    if not ok:\n        return {'score': 0, 'verdict': 'wait', 'reasons': ['Product page data was not verified.'] + (verify.get('problems') or []), 'escalate': False}\n\n    if price is not None:\n        score += 1\n        if price <= budget:\n            score += 1\n            reasons.append('Price is within budget.')\n        else:\n            reasons.append('Price is above budget.')\n    if extracted.get('review_count') and extracted.get('review_count') >= 1000:\n        score += 1\n        reasons.append('There are many ratings.')\n    if extracted.get('review_signals'):\n        score += 1\n        reasons.append('Review text contains usable signals.')\n    if extracted.get('independent_reviews'):\n        score += 1\n        reasons.append('Independent review hits were found.')\n    if extracted.get('alternatives'):\n        score += 1\n        reasons.append('Cheaper alternatives were found.')\n\n    cheap_disagree = bool(extracted.get('cheap_signals_disagree'))\n    above_100 = isinstance(price, (int, float)) and price > 100\n    if above_100 or cheap_disagree:\n        escalate = True\n        reasons.append('Escalation condition triggered.')\n\n    if price is None:\n        verdict = 'wait'\n    elif price <= budget and not cheap_disagree and not above_100 and not extracted.get('alternatives'):\n        verdict = 'buy'\n    elif extracted.get('alternatives'):\n        verdict = 'pick-an-alternative'\n    else:\n        verdict = 'wait'\n\n    if cheap_disagree and extracted.get('alternatives'):\n        verdict = 'pick-an-alternative'\n    return {'score': score, 'verdict': verdict, 'reasons': reasons, 'escalate': escalate}\n",
+      "tests": [
+        {
+          "args": {
+            "extracted": {
+              "price": 129.99,
+              "review_count": 12345,
+              "review_signals": [
+                "works great",
+                "poor quality"
+              ],
+              "independent_reviews": [
+                {
+                  "title": "x"
+                }
+              ],
+              "alternatives": [
+                {
+                  "title": "y"
+                }
+              ],
+              "cheap_signals_disagree": true
+            },
+            "verify": {
+              "ok": true
+            }
+          },
+          "expect": {
+            "verdict": "pick-an-alternative",
+            "escalate": true
+          },
+          "contains": {
+            "reasons": [
+              "Price is above budget",
+              "Escalation condition triggered"
+            ]
+          }
+        },
+        {
+          "args": {
+            "extracted": {
+              "price": 49.0,
+              "review_count": 250,
+              "review_signals": [],
+              "independent_reviews": [],
+              "alternatives": [
+                {
+                  "title": "y"
+                }
+              ],
+              "cheap_signals_disagree": false
+            },
+            "verify": {
+              "ok": true
+            }
+          },
+          "expect": {
+            "verdict": "pick-an-alternative",
+            "escalate": false
+          },
+          "contains": {
+            "reasons": [
+              "Price is within budget",
+              "Cheaper alternatives were found"
+            ]
+          }
+        },
+        {
+          "args": {
+            "extracted": {
+              "price": 49.0
+            },
+            "verify": {
+              "ok": false,
+              "problems": [
+                "Amazon page did not return HTTP 200."
+              ]
+            }
+          },
+          "expect": {
+            "verdict": "wait",
+            "score": 0,
+            "escalate": false
+          },
+          "contains": {
+            "reasons": [
+              "Product page data was not verified"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "compose_amazon_buy_verdict",
+      "description": "Compose the final spoken verdict and markdown report, using escalated agent results when available and refusing to overstate uncertain evidence.",
+      "code": "def run(amazon_url, budget_usd, extracted, verify, judge, product_reality_check, reddit_research):\n    def clean(x):\n        return ' '.join(str(x).split()) if x is not None else ''\n\n    extracted = extracted if isinstance(extracted, dict) else {}\n    verify = verify if isinstance(verify, dict) else {}\n    judge = judge if isinstance(judge, dict) else {}\n    title = clean(extracted.get('product_title')) or 'the product'\n    price = extracted.get('price')\n    verdict = judge.get('verdict', 'wait')\n    reasons = judge.get('reasons') or []\n    pr = clean(product_reality_check.get('result')) if isinstance(product_reality_check, dict) else ''\n    rr = clean(reddit_research.get('result')) if isinstance(reddit_research, dict) else ''\n\n    if not verify.get('ok'):\n        speech = f'Wait on {title}. I could not verify the Amazon page cleanly, so I would not trust a purchase decision yet.'\n    else:\n        if verdict == 'buy':\n            speech = f'Buy {title}. The price looks reasonable and the basic signals are steady.'\n        elif verdict == 'pick-an-alternative':\n            speech = f'Pick an alternative to {title}. The signals point to a better-value option nearby.'\n        else:\n            speech = f'Wait on {title}. The deal does not look clean enough for a confident buy.'\n\n    lines = ['# Amazon Buy Check', '']\n    lines.append('## Verdict')\n    lines.append(f'- **Decision:** {verdict}')\n    lines.append(f'- **Product:** {title}')\n    lines.append(f'- **URL:** {clean(extracted.get(\"url\")) or amazon_url}')\n    lines.append(f'- **Price:** ${price:.2f}' if isinstance(price, (int, float)) else '- **Price:** unknown')\n    lines.append(f'- **Budget:** ${float(budget_usd):.2f}' if budget_usd is not None else '- **Budget:** not set')\n    lines.append('')\n    lines.append('## Reasons')\n    for r in reasons[:8]:\n        lines.append(f'- {clean(r)}')\n    if verify.get('problems'):\n        lines.append('')\n        lines.append('## Verification problems')\n        for p in verify.get('problems', [])[:8]:\n            lines.append(f'- {clean(p)}')\n    if pr:\n        lines.append('')\n        lines.append('## Product Reality Check')\n        lines.append(pr)\n    if rr:\n        lines.append('')\n        lines.append('## Reddit Research')\n        lines.append(rr)\n    if extracted.get('independent_reviews'):\n        lines.append('')\n        lines.append('## Independent review hits')\n        for hit in extracted.get('independent_reviews', [])[:5]:\n            if isinstance(hit, dict):\n                lines.append(f'- {clean(hit.get(\"title\"))}: {clean(hit.get(\"snippet\"))} {clean(hit.get(\"url\"))}')\n    if extracted.get('alternatives'):\n        lines.append('')\n        lines.append('## Cheaper alternatives')\n        for hit in extracted.get('alternatives', [])[:5]:\n            if isinstance(hit, dict):\n                lines.append(f'- {clean(hit.get(\"title\"))}: {clean(hit.get(\"snippet\"))} {clean(hit.get(\"url\"))}')\n\n    report = '\\n'.join(lines)\n    return {'speech': speech[:900], 'report': report}\n",
+      "tests": [
+        {
+          "args": {
+            "amazon_url": "https://www.amazon.com/dp/example",
+            "budget_usd": 100,
+            "extracted": {
+              "product_title": "Widget Pro",
+              "url": "https://www.amazon.com/dp/example",
+              "price": 129.99,
+              "independent_reviews": [
+                {
+                  "title": "Review site",
+                  "snippet": "mixed",
+                  "url": "https://review.example"
+                }
+              ],
+              "alternatives": [
+                {
+                  "title": "Cheaper Widget",
+                  "snippet": "similar",
+                  "url": "https://alt.example"
+                }
+              ]
+            },
+            "verify": {
+              "ok": true,
+              "problems": []
+            },
+            "judge": {
+              "verdict": "pick-an-alternative",
+              "reasons": [
+                "Price is above budget.",
+                "Escalation condition triggered."
+              ]
+            },
+            "product_reality_check": {
+              "result": "Marketing claims are partially supported."
+            },
+            "reddit_research": {
+              "result": "Users are mixed."
+            }
+          },
+          "expect": {
+            "speech": "Pick an alternative to Widget Pro. The signals point to a better-value option nearby."
+          },
+          "contains": {
+            "report": [
+              "# Amazon Buy Check",
+              "**Decision:** pick-an-alternative",
+              "Product Reality Check",
+              "Reddit Research",
+              "Cheaper alternatives"
+            ]
+          }
+        },
+        {
+          "args": {
+            "amazon_url": "https://www.amazon.com/dp/example",
+            "budget_usd": 100,
+            "extracted": {
+              "product_title": "Gadget Mini",
+              "url": "https://www.amazon.com/dp/example",
+              "price": 49.0
+            },
+            "verify": {
+              "ok": false,
+              "problems": [
+                "Amazon page did not return HTTP 200."
+              ]
+            },
+            "judge": {
+              "verdict": "wait",
+              "reasons": [
+                "Product page data was not verified."
+              ]
+            },
+            "product_reality_check": null,
+            "reddit_research": null
+          },
+          "expect": {
+            "speech": "Wait on Gadget Mini. I could not verify the Amazon page cleanly, so I would not trust a purchase decision yet."
+          },
+          "contains": {
+            "report": [
+              "Verification problems",
+              "Amazon page did not return HTTP 200"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "examples": [
+    {
+      "amazon_url": "https://www.amazon.com/dp/B0EXAMPLE",
+      "budget_usd": 100,
+      "country": "US"
+    },
+    {
+      "amazon_url": "https://www.amazon.com/Some-Product/dp/B0EXAMPLE2",
+      "budget_usd": 150,
+      "country": "US"
+    }
+  ],
+  "estimate": {
+    "min": {
+      "llm_tokens": 600,
+      "credits": 0.0,
+      "seconds": 5.8,
+      "images": 0,
+      "tts_chars": 100,
+      "usd": 0.026165
+    },
+    "max": {
+      "llm_tokens": 600,
+      "credits": 760.0,
+      "seconds": 365.8,
+      "images": 0,
+      "tts_chars": 900,
+      "usd": 13.786165
+    }
+  },
+  "safety": {
+    "verdict": "allow",
+    "notes": "This is a permitted product-research workflow using public sources, including price comparison and review aggregation, without disallowed fraud, harassment, or deception intent."
+  },
+  "voice": {
+    "elevenlabs_agent_id": "agent_3901m4f4taenespaw244tq973f4k",
+    "first_message": "I’ll sniff out the truth in that Amazon listing, dearie.",
+    "archetype": "hag",
+    "language": "en",
+    "cast": [],
+    "voice_id": "lOcBOvRcIXS7yTaPAHak",
+    "sounds": {
+      "arrive": "/artifacts/monsters/amazon-buy-or-wait-hag/v1/arrive.mp3",
+      "working": "/artifacts/monsters/amazon-buy-or-wait-hag/v1/working.mp3",
+      "done": "/artifacts/monsters/amazon-buy-or-wait-hag/v1/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/amazon-buy-or-wait-hag/v1/birth.mp3"
+  }
+}

@@ -1,3 +1,4 @@
+import difflib
 import json
 import logging
 import math
@@ -68,7 +69,22 @@ def fit_policy(spec: MonsterSpec):
     p.max_steps = max(p.max_steps, len(spec.leaves()))
 
 
+def _fix_agent_ids(raw: dict, agents: dict[str, dict]):
+    """The designer sometimes mistypes a letter of a long agent id; take the only near-identical real one."""
+    if not agents:
+        return
+    for group in raw.get("steps") or []:
+        for step in group.get("parallel") or [group]:
+            args = step.get("args") or {}
+            aid = args.get("agent_id")
+            if step.get("limb") == "sokosumi" and isinstance(aid, str) and aid not in agents:
+                close = difflib.get_close_matches(aid, list(agents), n=2, cutoff=0.9)
+                if len(close) == 1:
+                    args["agent_id"] = close[0]
+
+
 async def check(raw: dict, agents: dict[str, dict]) -> tuple[MonsterSpec | None, list[str]]:
+    _fix_agent_ids(raw, agents)
     try:
         spec = MonsterSpec.model_validate(raw)
     except ValidationError as e:
