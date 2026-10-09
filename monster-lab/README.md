@@ -26,12 +26,18 @@ npm run build      # static bundle in dist/
 - The 3D lab fills most of the screen. The scientist, operating table and
   wandering monsters are in the scene, with a single prompt bar at the
   bottom. **No text answers are shown here.**
-- The Lab **only builds monsters**. You describe a job ("check whether an
-  online shop is a scam"); Frankenstein forges a monster for it while the
-  surgical cinematic plays (pull back to the slab, incision, sew, lever,
-  lightning, reveal). The monster leaps off the table, starts wandering, and
-  its tab opens. The job's detected **topic** (20 topics, see §4) only picks
-  the monster's look and voice; any number of monsters can share a topic.
+- You describe a job ("check whether an online shop is a scam") and its
+  **topic** is detected (20 topics, see §4); the topic picks the monster's
+  look and voice.
+  - **New topic:** Frankenstein forges a monster for it while the surgical
+    cinematic plays (pull back to the slab, incision, sew, lever, lightning,
+    reveal). The monster leaps off the table, starts wandering, and its tab
+    opens.
+  - **Topic that already has a monster** (e.g. a second weather bot): that
+    topic's most recent monster charges the screen and screams (a temporary
+    stand-in if its counterpart was destroyed), then its existing chat opens.
+    Nothing new is built, and the prompt isn't sent to it.
+  - Jobs with no recognised topic ("generic") always get a new monster.
 - **Stop during creation:** the scientist hoists the unfinished body into the
   bin and returns to idle. No assistant or tab is created.
 - **Clicking a wandering monster** (or its name tag) opens its tab.

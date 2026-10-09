@@ -1,10 +1,12 @@
-// Laboratory controller. The lab only builds: every prompt describes a job,
-// Frankenstein forges a monster for it (surgery cinematic) and its tab opens.
-// The job's topic only picks the monster's look and voice.
+// Laboratory controller. Every prompt describes a job; its topic is detected:
+//   - new topic   → Frankenstein forges a monster for it (surgery cinematic)
+//                   and its tab opens. The topic picks the look and voice.
+//   - known topic → that topic's existing monster charges the screen and
+//                   screams, then its existing chat opens.
 // Prompts submitted during cleanup wait until the hose is done.
 import { state, save } from '../core/store.js';
 import { matchTheme, themeOf } from '../monsters/themes.js';
-import { draftAssistant, commitAssistant, allMonsters } from '../monsters/registry.js';
+import { draftAssistant, commitAssistant, allMonsters, titleOf } from '../monsters/registry.js';
 import { limbLabel } from '../monsters/limbParts.js';
 import * as F from '../ai/frankenstein.js';
 import { monsterVoice } from '../audio/monsterVoice.js';
@@ -33,7 +35,7 @@ export class LabController {
     this.creatures = creatures;
     this.ui = ui;
     this.monsters = monsters;
-    this.busy = null; // { kind: 'create', topic }
+    this.busy = null; // { kind: 'create' | 'summon', topic }
     this.queued = null; // job waiting for cleanup to finish
   }
 
@@ -68,6 +70,18 @@ export class LabController {
   async _start(job) {
     const topic = matchTheme(job);
     const th = themeOf(topic);
+    const existing = this._existingFor(topic);
+    if (existing) {
+      this.busy = { kind: 'summon', topic };
+      this.ui.banner(`Summoning <b>${escapeHtml(titleOf(existing))}</b>`, { busy: true });
+      this.ui.renderControls();
+      await this.director.summon(existing);
+      this.busy = null;
+      this.ui.banner(null);
+      this.ui.renderControls();
+      this.ui.openMonster(existing.id);
+      return;
+    }
     const draft = draftAssistant(topic, job);
     const forgeAbort = new AbortController();
     this.busy = { kind: 'create', topic, draft, forgeAbort };
@@ -111,6 +125,13 @@ export class LabController {
     this.ui.banner(null);
     this.ui.renderControls();
     this.ui.openMonster(a.id);
+  }
+
+  // The topic's most recent monster. Unrecognised ("generic") jobs always get
+  // a new monster, since they have nothing in common with each other.
+  _existingFor(topic) {
+    if (topic === 'generic') return null;
+    return allMonsters().filter((m) => m.theme === topic).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0] || null;
   }
 
   stop() {
