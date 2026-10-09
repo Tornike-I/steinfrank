@@ -124,10 +124,14 @@ export function makeActions(lab, sfx) {
       pose(t, p) {
         const u = smooth(t / dur);
         const root = from.clone().lerp(to, u);
+        // Turn toward the way he's going and back over a fixed time, not a
+        // fraction of the walk: on short walks that made him spin round in a
+        // tenth of a second, swinging his arms out.
         let yaw = travel;
+        const turn = Math.min(0.4, dur * 0.45);
         if (dist < 0.05) yaw = yawEnd;
-        else if (u < 0.15) yaw = lerpAngle(0, travel, u / 0.15);
-        else if (u > 0.8) yaw = lerpAngle(travel, yawEnd, (u - 0.8) / 0.2);
+        else if (t < turn) yaw = lerpAngle(0, travel, smooth(t / turn));
+        else if (t > dur - turn) yaw = lerpAngle(travel, yawEnd, smooth((t - (dur - turn)) / turn));
         sci.stand(p, root, yaw, cam());
         const right = sci.dir(yaw, 1, 0, 0);
         const stepFn = (x) => {
@@ -143,8 +147,16 @@ export function makeActions(lab, sfx) {
         p.hipsY -= Math.abs(sw) * 0.03;
         p.spineZ = sw * 0.06;
         const L = (x, y, z) => sci.local(root, yaw, x, y, z);
-        p.hR.p.copy(L(-0.24, 0.9, 0.12 + sw * 0.12));
-        p.hL.p.copy(L(0.24, 0.9, 0.12 - sw * 0.12));
+        // Hands held up in front like a surgeon who has just scrubbed in, with
+        // a little bob in step: clear of his coat and of the table edge he
+        // walks past (hanging at table height, they had to be shoved out of
+        // it, which made his arms flap).
+        p.hR.p.copy(L(-0.19, 1.1 + Math.abs(sw) * 0.02, 0.27 + sw * 0.03));
+        p.hL.p.copy(L(0.19, 1.1 + Math.abs(sw) * 0.02, 0.27 - sw * 0.03));
+        const fwd = sci.dir(yaw, 0, 0, 1);
+        handQuat(V(0, 1, 0).addScaledVector(fwd, 0.25), fwd.clone().negate(), p.hR.q);
+        handQuat(V(0, 1, 0).addScaledVector(fwd, 0.25), fwd.clone().negate(), p.hL.q);
+        p.hR.curl = p.hL.curl = 0.2;
         p.spineX = 0.32;
       },
     };

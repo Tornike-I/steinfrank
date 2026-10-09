@@ -489,7 +489,7 @@ export class Scientist {
     this.collide = a.collide !== false;
     this._dt = dt * this.timeScale;
     if (this._nudge) {
-      const k = Math.exp(-dt * 1.5);
+      const k = Math.exp(-dt * 5);
       this._nudge.R.multiplyScalar(k);
       this._nudge.L.multiplyScalar(k);
     }
@@ -509,7 +509,9 @@ export class Scientist {
     p.look.copy(look); p.headTilt = 0; p.jaw = 0; p.brow = 0; p.blink = 0;
     const L = (x, y, z) => this.local(pos, yaw, x, y, z);
     p.fR.copy(L(-0.12, 0.07, 0.0)); p.fL.copy(L(0.12, 0.07, 0.02));
-    p.hR.p.copy(L(-0.25, 0.86, 0.12)); p.hL.p.copy(L(0.25, 0.86, 0.12));
+    // Hanging just outside the coat (inside it, the collision fixes held
+    // the arms out from his body).
+    p.hR.p.copy(L(-0.3, 0.88, 0.1)); p.hL.p.copy(L(0.3, 0.88, 0.1));
     const fwd = this.dir(yaw, 0, 0, 1), right = this.dir(yaw, 1, 0, 0);
     handQuat(V(0, -1, 0).addScaledVector(fwd, 0.3), right.clone(), p.hR.q);
     handQuat(V(0, -1, 0).addScaledVector(fwd, 0.3), right.clone().negate(), p.hL.q);
@@ -597,7 +599,7 @@ export class Scientist {
     }
     for (const k of stale) this._solveArm(k, p, this._nudge?.[k]);
     const prev = this._lean || 0;
-    const held = need > prev ? Math.min(need, prev + dt * 90) : Math.max(need, prev - dt * 2.5);
+    const held = need > prev ? Math.min(need, prev + dt * 45) : Math.max(need, prev - dt * 2.5);
     this._lean = held;
     if (Math.abs(held - need) > 1e-3) {
       // Redo the posture with the eased amount instead of the raw one.
@@ -630,6 +632,10 @@ export class Scientist {
         this._solveArms(p);
       }
     }
+    // This frame's elbow directions become the starting point for the next.
+    for (const st of Object.values(this._elbow || {})) {
+      if (st.next) { st.used = st.next.used; st.idx = st.next.idx; st.next = null; }
+    }
     // Legs: knees point forward.
     for (const k of ['R', 'L']) {
       const leg = this.legs[k];
@@ -655,48 +661,46 @@ export class Scientist {
     this._keepOut(target, 0.06, h.q);
     // His body doesn't move while one arm is solved: place the shapes once.
     const snap = this._shapeSnapshot();
-    // Elbow placements to try, in order: hanging out and back, out to the
-    // side, lifted up and out (reaching over), forward and out.
-    const poles = [
-      this.local(p.rootPos, p.rootYaw, arm.side * 0.9, 0.9, -0.6),
-      this.local(p.rootPos, p.rootYaw, arm.side * 1.6, 0.9, -0.1),
-      this.local(p.rootPos, p.rootYaw, arm.side * 0.8, 2.0, -0.2),
-      this.local(p.rootPos, p.rootYaw, arm.side * 1.7, 1.5, 0.1),
-      this.local(p.rootPos, p.rootYaw, arm.side * 1.3, 1.1, 0.6),
-    ];
-    let clear = false;
-    for (let i = 0; i < poles.length && !clear; i++) {
-      solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
-      clear = !this._armHits(arm, target, snap);
-    }
-    // Only his head in the way? Then keep the hand where it should be: the
-    // head-lift in apply() deals with that, more cheaply and without pulling
-    // the hand off its mark (a scalpel off the incision line).
+    // Where the elbow points (see ELBOW_POLES). The preferred direction is the
+    // first one in the list that keeps the whole arm clear; the elbow always
+    // eases toward it from where it was last frame and never jumps, even if
+    // that means brushing something for a moment, and it only goes back to a
+    // direction higher up the list once that one is clear with room to
+    // spare. Without this the elbows flapped in and out from frame to frame
+    // (the "chicken"), which looks far worse than a brief touch.
+    const st = ((this._elbow ||= {})[k] ||= { used: ELBOW_POLES[0].slice(), idx: 0, next: null });
+    const pole = (q) => this.local(p.rootPos, p.rootYaw, arm.side * q[0], q[1], q[2]);
+    const fits = (q, shapes, extra = 0) => {
+      solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, pole(q));
+      return !this._armHits(arm, target, shapes, extra);
+    };
+    const ease = 1 - Math.exp(-(this._dt ?? 1 / 60) * 7);
+    const settle = (shapes) => {
+      for (let i = 0; i < ELBOW_POLES.length; i++) {
+        if (!fits(ELBOW_POLES[i], shapes, i < st.idx ? 0.03 : 0)) continue;
+        const q = lerp3(st.used, ELBOW_POLES[i], ease);
+        fits(q, shapes);
+        st.next = { used: q, idx: i };
+        return true;
+      }
+      return false;
+    };
+    // Only the table, the patient and his head decide where the elbow goes.
+    // His own coat doesn't: keeping the arms clear of his big belly pushed
+    // the elbows out like wings, and a sleeve brushing his side looks far
+    // better than that.
     const head = (o) => o.src.obj === this.head || o.src.obj === this.cranium;
+    const solids = snap.filter((o) => !o.src.self || head(o));
+    let clear = settle(solids);
+    // Only his head in the way? The head-lift in apply() deals with that.
+    if (!clear) clear = settle(solids.filter((o) => !head(o)));
+    // Nothing fits: keep easing toward the current direction, with the hand
+    // on its mark (a scalpel stays on the incision line). Shoving the hand
+    // clear jerked the arms about, which looked worse than a brief overlap.
     if (!clear) {
-      const body = snap.filter((o) => !head(o));
-      for (let i = 0; i < poles.length && !clear; i++) {
-        solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, poles[i]);
-        clear = !this._armHits(arm, target, body);
-      }
-    }
-    if (!clear) {
-      // Last resort: move the hand outward from his chest (and up, over any
-      // table or patient) until the whole arm is clear.
-      const chest = this.chest.getWorldPosition(V());
-      const out = target.clone().sub(chest).setY(0);
-      if (out.lengthSq() < 1e-4) out.copy(this.dir(p.rootYaw, arm.side, 0, 0.5));
-      out.normalize();
-      let best = poles[1];
-      for (let i = 0; i < 10 && !clear; i++) {
-        target.addScaledVector(out, 0.035);
-        target.y += 0.03; // a little higher too: forearms come down onto things more steeply
-        for (const pole of [poles[1], poles[3], poles[2]]) {
-          solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, pole);
-          if (!this._armHits(arm, target, snap)) { clear = true; best = pole; break; }
-        }
-      }
-      if (!clear) solveTwoBone(arm.upper, arm.fore, UPPER, FORE, target, best);
+      const q = lerp3(st.used, ELBOW_POLES[st.idx], ease);
+      fits(q, snap);
+      st.next = { used: q, idx: st.idx };
     }
     setWorldQuat(arm.hand, h.q, arm.fore);
     const c = h.curl;
@@ -737,16 +741,24 @@ export class Scientist {
   }
 
   // After IK: nudge each hand until no part of either glove is inside a
-  // solid (or his own body), and the two gloves only touch, never overlap.
+  // solid (or his face), and the two gloves only touch, never overlap.
   // A hand holding a tool stays put if it can; the free one gives way.
-  // The nudge carries over to the next frame (fading slowly), so hands that
-  // stay in contact, like rubbing palms, rarely need a re-solve.
+  // The nudge carries over to the next frame (fading within a fraction of a
+  // second), so hands that stay in contact, like rubbing palms, rarely need
+  // a re-solve.
   _settleHands(p) {
     const nudge = (this._nudge ||= { R: V(), L: V() });
+    // A hand may only be pushed so far per frame (about 1.2 m/s): it drifts
+    // clear over a few frames rather than jumping, which matters more than
+    // a moment of overlap.
+    const start = { R: nudge.R.clone(), L: nudge.L.clone() };
+    const maxStep = Math.max(0.01, (this._dt ?? 1 / 60) * 1.2);
     const holding = (k) => this.arms[k].grip.children.length > 0;
     for (let iter = 0; iter < 6; iter++) {
       const pts = { R: this._handPoints('R'), L: this._handPoints('L') };
-      const shapes = this._shapeSnapshot();
+      // Gloves stay out of the table, the patient and his face, but may rest
+      // against his coat: pushing them off it held his arms out like wings.
+      const shapes = this._shapeSnapshot().filter((o) => !o.src.self || o.src.obj === this.head || o.src.obj === this.cranium);
       const fix = { R: V(), L: V() };
       let any = false;
       for (const k of ['R', 'L']) {
@@ -783,11 +795,18 @@ export class Scientist {
         any = true;
       }
       if (!any) return;
+      let moved = false;
       for (const k of ['R', 'L']) {
         if (fix[k].lengthSq() < 1e-10) continue;
+        const was = nudge[k].clone();
         nudge[k].add(fix[k]);
+        const step = nudge[k].clone().sub(start[k]);
+        if (step.length() > maxStep) nudge[k].copy(start[k]).add(step.setLength(maxStep));
+        if (nudge[k].distanceToSquared(was) < 1e-10) continue;
+        moved = true;
         this._solveArm(k, p, nudge[k]);
       }
+      if (!moved) return;
     }
   }
 
@@ -893,10 +912,13 @@ export class Scientist {
     for (let iter = 0; iter < 5; iter++) {
       let moved = false;
       for (const o of this._shapes()) {
-        if (this._hit(o, p, margin)) { p.add(this._exit(o, p, margin)); moved = true; }
+        // His own coat only needs a hair's clearance; more holds the arms
+        // out from his body.
+        const m = o.self ? Math.min(margin, 0.02) : margin;
+        if (this._hit(o, p, m)) { p.add(this._exit(o, p, m)); moved = true; }
         if (tipOff) {
           const tip = p.clone().add(tipOff);
-          if (this._hit(o, tip, margin * 0.6)) { p.add(this._exit(o, tip, margin * 0.6)); moved = true; }
+          if (this._hit(o, tip, m * 0.6)) { p.add(this._exit(o, tip, m * 0.6)); moved = true; }
         }
       }
       if (!moved) return;
@@ -905,15 +927,15 @@ export class Scientist {
 
   // Does the upper arm or forearm pass through anything (himself included)?
   // The first stretch of the upper arm starts inside his shoulder, so skip it.
-  _armHits(arm, wrist, snap = this._shapeSnapshot()) {
+  _armHits(arm, wrist, snap = this._shapeSnapshot(), extra = 0) {
     const s = arm.upper.getWorldPosition(V());
     const e = arm.fore.getWorldPosition(V());
     const inside = (p, m) => snap.some((o) => this._hitFast(o, p, m));
     const q = V();
     for (let i = 1; i <= 8; i++) {
       const u = i / 8;
-      if (u > 0.3 && inside(q.copy(s).lerp(e, u), 0.035)) return true;
-      if (i < 8 && inside(q.copy(e).lerp(wrist, u), 0.03)) return true;
+      if (u > 0.3 && inside(q.copy(s).lerp(e, u), 0.035 + extra)) return true;
+      if (i < 8 && inside(q.copy(e).lerp(wrist, u), 0.03 + extra)) return true;
     }
     return false;
   }
@@ -921,6 +943,22 @@ export class Scientist {
 
 // ------------------------------------------------------------------ IK ----
 const _L = V();
+// Elbow directions in his own frame ([out to his side, height, forward],
+// side flipped per arm), most natural first: tucked down and back, a little
+// out in small steps, out to the side, lifted up and out (reaching over),
+// up and out, and forward and out.
+const ELBOW_POLES = [
+  [0.35, 0.6, -0.8],
+  [0.55, 0.7, -0.7],
+  [0.75, 0.75, -0.6],
+  [0.95, 0.85, -0.45],
+  [1.25, 0.9, -0.3],
+  [1.6, 0.9, -0.1],
+  [0.8, 2.0, -0.2],
+  [1.7, 1.5, 0.1],
+  [1.3, 1.1, 0.6],
+];
+const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const _S = V(), _D = V(), _n = V(), _E = V(), _T = V(), _X = V(), _Y = V(), _Z = V();
 const _m4 = new THREE.Matrix4(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qp = new THREE.Quaternion();
 
