@@ -17,7 +17,7 @@ import { LibraryView } from './library/libraryView.js';
 import { Den } from './den/den.js';
 import { monsterVoice } from './audio/monsterVoice.js';
 import { LiveVoice } from './ai/liveVoice.js';
-import { buildFor, getMonster } from './monsters/registry.js';
+import { buildFor, getMonster, adoptServerMonsters, allMonsters } from './monsters/registry.js';
 import { animateMonster } from './monsters/monsterAnim.js';
 import { disposeMonster } from './monsters/monsterGen.js';
 import { ChatUI } from './chat/ui.js';
@@ -158,7 +158,12 @@ if (state.settings.sound) {
   const unlock = () => { sfx.setEnabled(true); window.removeEventListener('pointerdown', unlock); };
   window.addEventListener('pointerdown', unlock);
 }
-F.watchHealth(() => ui.renderHeader());
+F.watchHealth((ok) => {
+  ui.renderHeader();
+  if (ok) F.listMonsters().then((cards) => {
+    if (adoptServerMonsters(cards)) { ui.renderSidebar(); creatures.sync(allMonsters()); }
+  }, () => {});
+});
 onExternalChange(() => ui.renderSidebar());
 director.greet();
 

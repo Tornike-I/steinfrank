@@ -112,6 +112,34 @@ export function draftAssistant(topic, job = '', custom = null) {
   };
 }
 
+// Monsters published on the server join every visitor's Library; ids are fixed so a deletion sticks.
+export function adoptServerMonsters(cards) {
+  const known = new Set(state.monsters.map((m) => m.provider?.monsterId).filter(Boolean));
+  const gone = new Set(state.deletedMonsters || []);
+  let added = 0;
+  for (const card of cards) {
+    const id = `srv-${card.id}`;
+    if (known.has(card.id) || gone.has(id) || getMonster(id)) continue;
+    const theme = matchTheme(`${card.name} ${card.purpose}`);
+    if (theme !== 'generic' && findByTopic(theme)) continue;
+    const custom = theme === 'generic'
+      ? { label: customTopic(card.name).label, keywords: customTopic(`${card.name} ${card.purpose}`).keywords }
+      : null;
+    const seed = [...card.id].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261);
+    commitAssistant({
+      ...draftAssistant(theme, card.purpose, custom),
+      id,
+      seed,
+      name: makeName(theme, new Rng(seed)),
+      provider: { kind: 'frankenstein', monsterId: card.id, name: card.name, purpose: card.purpose, inputs: card.inputs, voice: card.has_voice },
+      limbs: card.limbs,
+    });
+    known.add(card.id);
+    added++;
+  }
+  return added;
+}
+
 // Offline monsters still get a body that matches their scripted workflow.
 export function scriptedLimbs(topic) {
   const wf = WORKFLOWS[topic] || WORKFLOWS.generic;
