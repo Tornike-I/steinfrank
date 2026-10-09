@@ -142,7 +142,8 @@ async function* frankensteinRun(assistant, input, { signal, onRun }) {
       if (r.status === 'failed' || r.status === 'blocked') throw new Error(r.error || `run ${r.status}`);
       if (r.status === 'completed') {
         const out = r.output || {};
-        if (out.speech) yield { type: 'speech', text: out.speech, audio: F.artifactUrl(out.speech_audio_url) };
+        const rewrite = (r.log || []).find((e) => e.step === 'speech' && e.event === 'rewritten');
+        if (out.speech) yield { type: 'speech', text: out.speech, audio: F.artifactUrl(out.speech_audio_url), usage: rewrite?.usage || null };
         const report = String(out.report || out.speech || '(no report)');
         for (const w of report.match(/\s*\S+\s*/g) || []) {
           if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });

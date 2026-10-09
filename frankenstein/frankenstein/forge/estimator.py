@@ -1,4 +1,4 @@
-from .. import config
+from .. import config, speech
 from ..limbs import REGISTRY, Cost, get_limb
 from ..spec import Estimate, MonsterSpec, Usage
 
@@ -36,6 +36,8 @@ def estimate(spec: MonsterSpec) -> Estimate:
         tts = REGISTRY["tts"]
         lo = lo + tts.estimate({"text": "x" * MIN_SPEECH_CHARS})
         hi = hi + tts.estimate({"text": "x" * config.SPEECH_MAX_CHARS})
+        rewrite = Cost(llm_tokens=speech.REWRITE_TOKENS)
+        lo, hi = lo + rewrite, hi + rewrite
     return Estimate(min=_usage(lo), max=_usage(hi))
 
 
@@ -46,4 +48,6 @@ def step_estimates(spec: MonsterSpec) -> dict[str, dict]:
         limb = get_limb(leaf.limb, spec)
         if limb is not None:
             out[leaf.id] = _usage(limb.estimate(leaf.args) * (leaf.for_each.max if leaf.for_each else 1)).model_dump()
+    if spec.speak:
+        out["speech"] = _usage(Cost(llm_tokens=speech.REWRITE_TOKENS)).model_dump()
     return out

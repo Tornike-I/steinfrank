@@ -5,7 +5,6 @@ import { state, save } from '../core/store.js';
 import { renderMarkdown } from './markdown.js';
 import { allMonsters, titleOf } from '../monsters/registry.js';
 import { themeOf } from '../monsters/themes.js';
-import { limbLabel } from '../monsters/limbParts.js';
 import { backend } from '../ai/frankenstein.js';
 
 const GREETINGS = ['What shall we build tonight?', 'Name a chore. I have spare parts.', 'Every tedious job deserves a monster.', 'Describe the job. I will stitch the beast.'];
@@ -158,8 +157,7 @@ export class ChatUI {
       e.greeting.textContent = def ? `${def.name} ${th.intro}` : '';
       e.input.placeholder = this._placeholder(def);
       const real = def?.provider?.kind === 'frankenstein';
-      const limbs = def?.limbs?.length ? ` · limbs: ${[...new Set(def.limbs.map(limbLabel))].join(', ')}` : '';
-      e.disclaimer.textContent = def ? `${def.name} · ${titleOf(def)} · ${real ? `Frankenstein monster “${def.provider.monsterId}”` : 'simulated responses'}${limbs}` : '';
+      e.disclaimer.textContent = def ? `${def.name} · ${real ? 'built by Frankenstein' : 'simulated responses'}` : '';
     }
     this.renderIdeas();
     this.renderSidebar();

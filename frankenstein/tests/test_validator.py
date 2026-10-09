@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from frankenstein import speech
+
 from frankenstein.forge.estimator import estimate
 from frankenstein.forge.validator import validate
 from frankenstein.spec import MonsterSpec
@@ -38,7 +40,7 @@ def test_reference_monster_is_valid():
     assert errors(BASE) == []
     est = estimate(MonsterSpec.model_validate(BASE))
     assert 0 < est.max.llm_tokens <= BASE["policy"]["max_llm_tokens"] and est.max.credits == 0
-    assert est.min.llm_tokens == 0 and est.max.tts_chars >= 900
+    assert est.min.llm_tokens == speech.REWRITE_TOKENS and est.max.tts_chars >= 900
 
 
 @pytest.mark.parametrize(

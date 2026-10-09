@@ -371,8 +371,7 @@ body.debug-stage #topbar, body.debug-stage #sidebar, body.debug-stage #thread, b
 #app[data-mode="monsters"] .ideas { display: none; }
 #app[data-mode="monsters"] #chat-panel {
   display: flex; flex-direction: column; position: absolute; z-index: 4;
-  left: 50%; transform: translateX(-50%);
-  width: min(860px, calc(100% - 48px)); top: 47%; bottom: 18px;
+  right: 16px; top: 64px; bottom: 16px; width: clamp(320px, 36%, 460px);
   background: rgba(24, 22, 19, 0.92);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 18px;
@@ -382,20 +381,19 @@ body.debug-stage #topbar, body.debug-stage #sidebar, body.debug-stage #thread, b
 #app[data-mode="monsters"] #thread,
 #app[data-mode="monsters"] #main.is-empty #thread { flex: 1; min-height: 0; overflow-y: auto; visibility: visible; order: 0; }
 #app[data-mode="monsters"] .column { width: 100%; margin: 0; }
-#app[data-mode="monsters"] #messages { min-height: 0; background: transparent; border: 0; box-shadow: none; padding: 20px 26px 6px; }
+#app[data-mode="monsters"] #messages { min-height: 0; background: transparent; border: 0; box-shadow: none; padding: 18px 18px 6px; }
 #app[data-mode="monsters"] #composer-wrap,
 #app[data-mode="monsters"] #main.is-empty #composer-wrap {
   background: linear-gradient(rgba(24, 22, 19, 0), rgba(24, 22, 19, 0.96) 30%); border: 0; box-shadow: none;
   padding: 10px 18px 12px; order: 1;
 }
 #app[data-mode="monsters"] #composer { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
-@media (max-height: 640px) { #app[data-mode="monsters"] #chat-panel { top: 40%; } }
 
 /* ===== Workflow boxes (monster tab, left side of the room) ===== */
 .workflow { display: none; }
 #app[data-mode="monsters"] .workflow:not([hidden]) {
   display: flex; flex-direction: column; position: absolute; z-index: 4;
-  left: 16px; top: 64px; bottom: 18px; width: 268px;
+  left: 16px; top: 64px; max-height: calc(100% - 80px); width: 248px;
   background: rgba(20, 19, 16, 0.82); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; overflow: hidden;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
@@ -403,9 +401,6 @@ body.debug-stage #topbar, body.debug-stage #sidebar, body.debug-stage #thread, b
 #app[data-mode="monsters"] .workflow.collapsed { bottom: auto; }
 #app[data-mode="monsters"] .workflow.collapsed .wf-flow { display: none; }
 #app[data-mode="monsters"] .workflow.collapsed .wf-toggle { transform: rotate(-90deg); }
-@media (min-width: 1180px) {
-  #app[data-mode="monsters"] #chat-panel { left: calc(50% + 142px); width: min(800px, calc(100% - 340px)); }
-}
 .wf-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 12px 8px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
 .wf-head span { font: 15px var(--display); letter-spacing: 0.3px; }
 .wf-head small { color: var(--muted); font-size: 11.5px; flex: 1; text-align: right; }
@@ -444,7 +439,11 @@ body.debug-stage #topbar, body.debug-stage #sidebar, body.debug-stage #thread, b
 .wf-box[data-state="skipped"], .wf-box[data-state="declined"], .wf-box[data-state="cancelled"] { opacity: 0.45; }
 .wf-box[data-state="error"] { border-color: var(--blood); background: #2e1a17; }
 @keyframes wf-pulse { 50% { box-shadow: 0 0 0 5px rgba(166, 214, 90, 0.1), 0 0 30px rgba(166, 214, 90, 0.5); } }
-@media (max-width: 900px) { #app[data-mode="monsters"] .workflow:not([hidden]) { width: 220px; } }
+@media (max-width: 1100px) { #app[data-mode="monsters"] .workflow:not([hidden]) { width: 210px; } }
+@media (max-width: 1440px) {
+  #app:not(.sidebar-collapsed)[data-mode="monsters"] .workflow:not([hidden]) { width: 210px; }
+  #app:not(.sidebar-collapsed)[data-mode="monsters"] #chat-panel { width: clamp(300px, 32%, 420px); }
+}
 
 /* ===== Library: roaming hall + cards ===== */
 .library { display: none; }

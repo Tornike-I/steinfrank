@@ -149,7 +149,7 @@ export class MonsterController {
           this.decisions.set(msg.id, ev.decide);
         } else if (ev.type === 'speech') {
           msg.speech = ev.text;
-          this.wf?.speech(def);
+          this.wf?.speech(def, ev.usage);
           monsterVoice.stopLoop();
           if (live()) monsterVoice.sound(sounds?.done);
           // In a live voice call the agent reads the verdict itself.

@@ -44,6 +44,10 @@ export class WorkflowView {
   }
 
   async show(def) {
+    if (!this._sized) {
+      this._sized = true;
+      this.el.classList.toggle('collapsed', window.innerWidth < 1100);
+    }
     this.def = def;
     this.render();
     if (!def || this.layout.has(def.id)) return;
@@ -84,7 +88,12 @@ export class WorkflowView {
     this._maybeRender(def);
   }
 
-  speech(def) { this._run(def).speech = 'done'; this._maybeRender(def); }
+  speech(def, usage = null) {
+    const r = this._run(def);
+    r.speech = 'done';
+    r.speechUsage = usage;
+    this._maybeRender(def);
+  }
 
   finish(def, status) {
     const r = this._run(def);
@@ -110,7 +119,7 @@ export class WorkflowView {
     const { rows, estimates, speaks } = this._rows(def);
     const run = this.live.get(def.id);
     let total = { llm_tokens: 0, credits: 0 };
-    for (const s of run?.steps.values() || []) {
+    for (const s of [...(run?.steps.values() || []), { usage: run?.speechUsage }]) {
       total.llm_tokens += s.usage?.llm_tokens || 0;
       total.credits += s.usage?.credits || 0;
     }
@@ -132,7 +141,7 @@ export class WorkflowView {
       </div>`;
     };
     const speakRow = speaks
-      ? `<div class="wf-row"><div class="wf-box" data-state="${run?.speech || 'idle'}"><div class="wf-icon">📯</div><div class="wf-text"><b>Speak the verdict</b><small>Voice · ElevenLabs</small></div></div></div>`
+      ? `<div class="wf-row"><div class="wf-box" data-state="${run?.speech || 'idle'}"><div class="wf-icon">📯</div><div class="wf-text"><b>Speak the verdict</b><span class="wf-note">Rewritten for listening, then voiced</span><small>LLM · OpenAI → Voice · ElevenLabs</small></div><div class="wf-cost">${esc(run?.speechUsage ? costText(run.speechUsage) : costText(estimates.speech, true))}</div></div></div>`
       : '';
     const body = rows.length
       ? rows.map((row) => `<div class="wf-row${row.length > 1 ? ' wf-par' : ''}">${row.map(box).join('')}</div>`).join('') + speakRow

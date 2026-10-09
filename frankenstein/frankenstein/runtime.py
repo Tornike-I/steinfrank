@@ -7,7 +7,7 @@ from dataclasses import asdict
 import httpx
 import openai
 
-from . import channels, config, safety, store
+from . import channels, config, safety, speech as speech_mod, store
 from .forge.estimator import estimate
 from .limbs import REGISTRY, BudgetExceeded, Cost, LimbError, NeedsInput, Pending, RunContext, dry_run_limb, get_limb
 from .refs import eval_when, lookup, render
@@ -283,6 +283,15 @@ class Runner:
     async def _finish(self, run, spec, data):
         output = render(spec.output, data)
         speech = clip_speech(output.get("speech", ""))
+        # Template-built speech can contain URLs and symbols that TTS reads out literally.
+        if spec.speak and speech and safety.available():
+            try:
+                speech, used = await speech_mod.speakable(speech, _text_of(output.get("report", "")))
+                speech = clip_speech(speech)
+                run["usage"] = (Cost(**run["usage"]) + Cost(llm_tokens=used)).as_dict()
+                run["log"].append({"step": "speech", "event": "rewritten", "usage": Cost(llm_tokens=used).as_dict()})
+            except Exception as e:
+                run["log"].append({"step": "speech", "event": "error", "detail": f"rewrite: {e}"})
         output["speech"] = speech
         flagged = await safety.moderate(speech + "\n" + _text_of(output.get("report", "")))
         if flagged:

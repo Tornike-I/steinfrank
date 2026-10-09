@@ -190,6 +190,14 @@ document.addEventListener('click', (ev) => {
 window.lab = { state, lab, creatures, director, ctrl, mon, den, menagerie, library, overlay, renderer, ui, debugStage: (on = true) => document.body.classList.toggle('debug-stage', on) };
 if (new URLSearchParams(location.search).get('debug') === 'stage') window.lab.debugStage(true);
 
+const chatPanelEl = document.getElementById('chat-panel');
+const workflowEl = document.getElementById('workflow');
+function freeSpan(r) {
+  const chat = chatPanelEl.getBoundingClientRect();
+  const wf = workflowEl.hidden ? null : workflowEl.getBoundingClientRect();
+  return { left: wf?.width ? wf.right - r.x : 0, right: chat.width ? chat.left - r.x : r.w };
+}
+
 const timer = new THREE.Timer();
 timer.connect(document);
 let lastError = 0;
@@ -249,9 +257,11 @@ function step(now) {
     menagerie.rig.update(dt);
   } else if (!inLab) {
     den.camera.aspect = aspect;
-    // Shift the picture up so the monster's head and shoulders sit above the
-    // floating chat panel, which covers its lower body.
-    den.camera.setViewOffset(r.w, r.h, 0, r.h * 0.2, r.w, r.h);
+    // Centre the monster in the free space between the workflow and chat panels.
+    const free = freeSpan(r);
+    den.camera.setViewOffset(r.w, r.h, r.w / 2 - (free.left + free.right) / 2, 0, r.w, r.h);
+    den.rightLimit = (free.right / r.w) * 2 - 1.04;
+    den.camera.zoom = THREE.MathUtils.clamp((free.right - free.left) / (r.w * 0.55), 0.72, 1);
     den.update(dt);
     den.rig.update(dt);
   }

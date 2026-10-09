@@ -402,9 +402,10 @@ export class Den {
       for (let i = 0; i < 6; i++) {
         const right = this.bubble.position.clone().add(V(h * 0.41, 0, 0)).project(this.camera);
         const upper = this.bubble.position.clone().add(V(0, h * 0.19, 0)).project(this.camera);
-        if (right.x > 0.96) this.bubble.position.x -= h * 0.12;
+        const limit = this.rightLimit ?? 0.96;
+        if (right.x > limit) this.bubble.position.x -= h * 0.12;
         if (upper.y > 0.92) this.bubble.position.y -= h * 0.06;
-        if (right.x <= 0.96 && upper.y <= 0.92) break;
+        if (right.x <= limit && upper.y <= 0.92) break;
       }
       this.puffs[0].position.set(top.x + h * 0.16, top.y + h * 0.02, top.z + 0.1);
       this.puffs[1].position.set(top.x + h * 0.26, top.y + h * 0.07 + bob * 0.5, top.z + 0.1);
