@@ -120,7 +120,9 @@ export function adoptServerMonsters(cards) {
   for (const card of cards) {
     const id = `srv-${card.id}`;
     if (known.has(card.id) || gone.has(id) || getMonster(id)) continue;
-    const theme = matchTheme(`${card.name} ${card.purpose}`);
+    // The name names the topic; the purpose has words like "brief" or "sources" that pull in other topics.
+    const byName = matchTheme(card.name);
+    const theme = byName !== 'generic' ? byName : matchTheme(`${card.name} ${card.purpose}`);
     if (theme !== 'generic' && findByTopic(theme)) continue;
     const custom = theme === 'generic'
       ? { label: customTopic(card.name).label, keywords: customTopic(`${card.name} ${card.purpose}`).keywords }
