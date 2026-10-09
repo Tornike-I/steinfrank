@@ -11,6 +11,7 @@ COPY frankenstein/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY frankenstein/ ./
 COPY --from=lab /app/monster-lab/dist /app/monster-lab/dist
-ENV FRANK_DATA_DIR=/data/data FRANK_MONSTERS_DIR=/data/monsters# The volume at /data starts empty; seed it with the repo's monsters without overwriting ones forged on the server.
+ENV FRANK_DATA_DIR=/data/data FRANK_MONSTERS_DIR=/data/monsters
+# The volume at /data starts empty; seed it with the repo's monsters without overwriting ones forged on the server.
 CMD mkdir -p /data/data /data/monsters && cp -rn monsters/. /data/monsters/ && \
     exec python -m uvicorn frankenstein.demo:app --host 0.0.0.0 --port ${PORT:-8000}
