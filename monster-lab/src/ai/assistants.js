@@ -75,7 +75,21 @@ async function* frankensteinRun(assistant, input, { signal, onRun }) {
   const id = assistant.provider.monsterId;
   const spec = await frankensteinSpec(assistant);
   const leaves = leavesOf(spec);
-  const run = await F.startRun(id, mapInputs(spec.inputs, input));
+  const inputs = mapInputs(spec.inputs, input);
+  // The backend rejects a run with a required input missing, so ask for it first.
+  for (const key of spec.inputs?.required || []) {
+    if (inputs[key] !== undefined && inputs[key] !== '') continue;
+    const p = spec.inputs.properties?.[key] || {};
+    let answer;
+    const got = new Promise((resolve, reject) => {
+      answer = resolve;
+      signal?.addEventListener('abort', () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })), { once: true });
+    });
+    const options = p.enum ? ` (${p.enum.join(', ')})` : '';
+    yield { type: 'question', text: `I also need the ${human(key).toLowerCase()}: ${p.description || ''}${options}`, reply: async (text) => answer(text) };
+    inputs[key] = coerce(p, String(await got).trim());
+  }
+  const run = await F.startRun(id, inputs);
   onRun?.(run.id);
 
   // Funnel SSE updates into this generator.

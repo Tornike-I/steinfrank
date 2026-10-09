@@ -74,6 +74,8 @@ RULES
   Omit output.memory for on-demand monsters.
 - notify delivers to recipients the user chose; you never pick recipients.
 - Every input needs a description; the voice agent reads it to ask the user. Keep inputs few and simple.
+  Put in "required" only the inputs the job cannot run without (usually one: the thing to work on). Every other
+  input is optional and gets a sensible "default" in its schema, so a user can give just the main thing.
 - policy: allowed_domains lists hosts http_fetch may call (["*"] when hosts come from user input). The numeric
   budgets (max_llm_tokens, max_credits, max_images, max_tts_chars, max_notifications, max_steps) are computed for
   you from the steps; you may leave them at 0.
