@@ -61,6 +61,7 @@ class Usage(BaseModel):
     seconds: float = 0
     images: int = 0
     tts_chars: int = 0
+    usd: float = 0
 
 
 class Estimate(BaseModel):

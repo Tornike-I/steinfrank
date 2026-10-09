@@ -1,6 +1,6 @@
 import time
 
-from .. import config, sokosumi, store
+from .. import config, pricing, sokosumi, store
 from .base import Cost, Limb, LimbError, NeedsInput, Pending
 
 FAILED = {"failed", "payment_failed", "refund_resolved", "dispute_resolved"}
@@ -29,7 +29,8 @@ class SokosumiLimb(Limb):
     outputs = {"result", "job_id", "credits", "files"}
 
     def estimate(self, args):
-        return Cost(credits=float(args.get("max_credits") or 0), seconds=self.seconds)
+        n = float(args.get("max_credits") or 0)
+        return Cost(credits=n, usd=pricing.credits(n), seconds=self.seconds)
 
     async def run(self, args, ctx):
         cap = float(args["max_credits"])
@@ -47,7 +48,8 @@ class SokosumiLimb(Limb):
         job = await sokosumi.get_job(state["job_id"])
         status = job["status"]
         if status == "completed":
-            ctx.charge(Cost(credits=float(job.get("credits") or 0)))
+            n = float(job.get("credits") or 0)
+            ctx.charge(Cost(credits=n, usd=pricing.credits(n)))
             try:
                 files = [{"name": f.get("name"), "url": f.get("fileUrl"), "mime": f.get("mimeType")}
                          for f in await sokosumi.get_files(job["id"])]

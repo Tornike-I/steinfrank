@@ -3,7 +3,7 @@ import os
 
 import httpx
 
-from .. import config
+from .. import config, pricing
 from ..openai_client import client
 from ..refs import literal_chars, template_refs
 from .base import Cost, Limb, LimbError
@@ -45,18 +45,17 @@ class TtsLimb(Limb):
 
     def estimate(self, args):
         text = args.get("text", "")
-        chars = literal_chars(text) + REF_CHARS * len(template_refs(text))
-        return Cost(tts_chars=min(chars, config.CAPS["max_tts_chars"]), seconds=self.seconds)
+        chars = min(literal_chars(text) + REF_CHARS * len(template_refs(text)), config.CAPS["max_tts_chars"])
+        return Cost(tts_chars=chars, usd=pricing.tts(args.get("model_id") or config.TTS_MODEL, chars), seconds=self.seconds)
 
     def precheck(self, args):
         return Cost(tts_chars=len(str(args.get("text", ""))))
 
     async def run(self, args, ctx):
         text = str(args["text"])
-        ctx.charge(Cost(tts_chars=len(text)))
-        audio = await _eleven_post(
-            f"/text-to-speech/{args.get('voice_id') or config.VOICE_ID}", {"text": text, "model_id": args.get("model_id") or config.TTS_MODEL}
-        )
+        model = args.get("model_id") or config.TTS_MODEL
+        ctx.charge(Cost(tts_chars=len(text), usd=pricing.tts(model, len(text))))
+        audio = await _eleven_post(f"/text-to-speech/{args.get('voice_id') or config.VOICE_ID}", {"text": text, "model_id": model})
         path, url = artifact_path(ctx, "mp3")
         path.write_bytes(audio)
         return {"file": str(path), "url": url}
@@ -110,7 +109,7 @@ class ImageLimb(Limb):
         return [] if spec.policy.max_images >= 1 else ["image needs policy.max_images >= 1"]
 
     async def run(self, args, ctx):
-        ctx.charge(Cost(images=1))
+        ctx.charge(Cost(images=1, usd=pricing.image(config.IMAGE_MODEL, args.get("quality") or "low")))
         resp = await client().images.generate(
             model=config.IMAGE_MODEL, prompt=str(args["prompt"]), size=args.get("size") or "1024x1024",
             quality=args.get("quality") or "low", n=1,
@@ -132,7 +131,11 @@ class WebSearchLimb(Limb):
     seconds = 2.0
     outputs = {"results"}
 
+    def estimate(self, args):
+        return Cost(usd=pricing.WEB_SEARCH, seconds=self.seconds)
+
     async def run(self, args, ctx):
+        ctx.charge(Cost(usd=pricing.WEB_SEARCH))
         body = {"query": str(args["query"]), "max_results": max(1, min(int(args.get("max_results") or 5), 10))}
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(

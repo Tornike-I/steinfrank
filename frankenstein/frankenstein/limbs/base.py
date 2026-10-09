@@ -20,6 +20,7 @@ class Cost:
     seconds: float = 0
     images: int = 0
     tts_chars: int = 0
+    usd: float = 0
 
     def __add__(self, other: "Cost") -> "Cost":
         return Cost(**{k: getattr(self, k) + getattr(other, k) for k in asdict(self)})

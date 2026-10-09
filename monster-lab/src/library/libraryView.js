@@ -7,13 +7,13 @@ import { bodyOf } from '../monsters/monsterGen.js';
 import { limbKind } from '../monsters/limbParts.js';
 import { TOOL } from '../chat/workflowView.js';
 import * as F from '../ai/frankenstein.js';
+import { usd, usageDetail } from '../core/money.js';
 
 const PLAN = {
   classic: '🧟 Classic', hydra: '🐉 Hydra', flyer: '🦇 Flyer', jelly: '🪼 Floater',
   spider: '🕷 Spider', serpent: '🐍 Serpent', tower: '🗼 Tower',
 };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
 
 export class LibraryView {
   constructor(el, { menagerie, open, thumbnail }) {
@@ -72,7 +72,7 @@ export class LibraryView {
     const chips = [`${PLAN[body.plan] || body.plan}${body.size !== 'normal' ? ` · ${body.size}` : ''}`];
     if (card?.voice?.archetype) chips.push(`🗣 ${card.voice.archetype}${card.voice.language === 'cs' ? ' · čeština' : ''}`);
     const est = card?.estimate?.max;
-    if (est) chips.push(est.llm_tokens || est.credits ? `≤${fmt(est.llm_tokens)} tok${est.credits ? ` · ≤${fmt(est.credits)} cr` : ''} / run` : 'free to run');
+    if (est) chips.push(est.usd ? `≤${usd(est.usd)} / run` : 'free to run');
     if (d.provider?.kind !== 'frankenstein') chips.push('simulated');
     const tools = [...new Set((d.limbs || []).map((l) => limbKind(l)))].map((k) => `<span title="${esc((TOOL[k] || TOOL.other).tool)}">${(TOOL[k] || TOOL.other).icon}</span>`).join('');
     return `<button type="button" class="lib-card" data-id="${esc(d.id)}">
@@ -81,7 +81,7 @@ export class LibraryView {
         <h3>${esc(titleOf(d))}</h3>
         <div class="lib-sub">${esc(d.name)} · ${esc(themeOf(d.theme).label)}</div>
         <p>${esc(d.job || card?.purpose || d.provider?.purpose || '')}</p>
-        <div class="lib-chips">${chips.map((c) => `<span>${esc(c)}</span>`).join('')}</div>
+        <div class="lib-chips" title="${esc(est ? `Worst case per run: ${usageDetail(est)}` : '')}">${chips.map((c) => `<span>${esc(c)}</span>`).join('')}</div>
         ${tools ? `<div class="lib-tools">${tools}</div>` : ''}
       </div>
     </button>`;

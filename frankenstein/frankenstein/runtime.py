@@ -287,9 +287,8 @@ class Runner:
         rewrite = Cost()
         if spec.speak and speech and safety.available():
             try:
-                speech, used = await speech_mod.speakable(speech, _text_of(output.get("report", "")))
+                speech, rewrite = await speech_mod.speakable(speech, _text_of(output.get("report", "")))
                 speech = clip_speech(speech)
-                rewrite = Cost(llm_tokens=used)
                 run["log"].append({"step": "speech", "event": "rewritten", "usage": rewrite.as_dict()})
             except Exception as e:
                 run["log"].append({"step": "speech", "event": "error", "detail": f"rewrite: {e}"})
@@ -302,12 +301,14 @@ class Runner:
         tts = REGISTRY["tts"]
         if spec.speak and speech and not self.dry_run and tts.enabled():
             ctx = self._ctx(run, spec, "speech")
+            before = ctx.usage
             try:
                 speak = {"text": speech, "model_id": config.SPEECH_TTS_MODEL}
                 if spec.voice.voice_id:
                     speak["voice_id"] = spec.voice.voice_id
                 output["speech_audio_url"] = (await self._call(tts, speak, ctx))["url"]
                 run["usage"] = ctx.usage.as_dict()
+                run["log"].append({"step": "speech", "event": "voiced", "usage": _delta(ctx.usage, before).as_dict()})
             except Exception as e:
                 run["log"].append({"step": "speech", "event": "error", "detail": str(e)})
         # Added after the TTS budget check: older specs' llm budgets don't include the rewrite.

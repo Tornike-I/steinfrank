@@ -1,7 +1,8 @@
 import hashlib
 import json
 
-from . import config, store
+from . import config, pricing, store
+from .limbs import Cost
 from .openai_client import client, sampling
 
 # Worst-case tokens for one rewrite; the estimator adds this to every speaking monster.
@@ -14,13 +15,17 @@ would ("example dot com"), round long numbers and say units in words. Reply in t
 Reply with JSON {"speech": "..."}."""
 
 
-async def speakable(speech: str, report: str = "") -> tuple[str, int]:
-    """The speech rewritten for listening, and the tokens it cost (0 when cached)."""
+def estimate() -> Cost:
+    return Cost(llm_tokens=REWRITE_TOKENS, usd=pricing.llm(config.RUNTIME_MODEL, REWRITE_TOKENS - 350, 350))
+
+
+async def speakable(speech: str, report: str = "") -> tuple[str, Cost]:
+    """The speech rewritten for listening, and what it cost (nothing when cached)."""
     user = json.dumps({"result": speech, "report_excerpt": report[:1500]}, ensure_ascii=False)
     key = "speech:" + hashlib.sha256(f"{config.RUNTIME_MODEL}\n{PROMPT}\n{user}".encode()).hexdigest()
     cached = store.cache_get(key)
     if cached is not None:
-        return cached, 0
+        return cached, Cost()
     resp = await client().chat.completions.create(
         model=config.RUNTIME_MODEL,
         messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": user}],
@@ -30,4 +35,5 @@ async def speakable(speech: str, report: str = "") -> tuple[str, int]:
     )
     text = str(json.loads(resp.choices[0].message.content or "{}").get("speech") or "").strip() or speech
     store.cache_put(key, text)
-    return text, resp.usage.total_tokens if resp.usage else 0
+    u = resp.usage
+    return text, Cost(llm_tokens=u.total_tokens, usd=pricing.llm(config.RUNTIME_MODEL, u.prompt_tokens, u.completion_tokens)) if u else Cost()

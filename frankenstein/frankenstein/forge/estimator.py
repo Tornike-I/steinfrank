@@ -6,7 +6,7 @@ MIN_SPEECH_CHARS = 100
 
 
 def _usage(c: Cost) -> Usage:
-    return Usage(**{k: (round(v, 1) if isinstance(v, float) else v) for k, v in c.as_dict().items()})
+    return Usage(**{k: (round(v, 6 if k == "usd" else 1) if isinstance(v, float) else v) for k, v in c.as_dict().items()})
 
 
 def _group(costs: list[Cost], parallel: bool) -> Cost:
@@ -34,9 +34,9 @@ def estimate(spec: MonsterSpec) -> Estimate:
         lo, hi = lo + _group(lows, parallel), hi + _group(highs, parallel)
     if spec.speak:
         tts = REGISTRY["tts"]
-        lo = lo + tts.estimate({"text": "x" * MIN_SPEECH_CHARS})
-        hi = hi + tts.estimate({"text": "x" * config.SPEECH_MAX_CHARS})
-        rewrite = Cost(llm_tokens=speech.REWRITE_TOKENS)
+        lo = lo + tts.estimate({"text": "x" * MIN_SPEECH_CHARS, "model_id": config.SPEECH_TTS_MODEL})
+        hi = hi + tts.estimate({"text": "x" * config.SPEECH_MAX_CHARS, "model_id": config.SPEECH_TTS_MODEL})
+        rewrite = speech.estimate()
         lo, hi = lo + rewrite, hi + rewrite
     return Estimate(min=_usage(lo), max=_usage(hi))
 
@@ -49,5 +49,5 @@ def step_estimates(spec: MonsterSpec) -> dict[str, dict]:
         if limb is not None:
             out[leaf.id] = _usage(limb.estimate(leaf.args) * (leaf.for_each.max if leaf.for_each else 1)).model_dump()
     if spec.speak:
-        out["speech"] = _usage(Cost(llm_tokens=speech.REWRITE_TOKENS)).model_dump()
+        out["speech"] = _usage(speech.estimate() + REGISTRY["tts"].estimate({"text": "x" * config.SPEECH_MAX_CHARS, "model_id": config.SPEECH_TTS_MODEL})).model_dump()
     return out

@@ -244,7 +244,7 @@ def test_speech_rewrite_never_blocks_tts(monkeypatch):
     from frankenstein.limbs import REGISTRY
 
     async def fake_speakable(text, report=""):
-        return "Rewritten.", 300
+        return "Rewritten.", Cost(llm_tokens=300, usd=0.0001)
 
     class FakeTts(Limb):
         name = "tts"

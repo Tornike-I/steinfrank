@@ -3,6 +3,7 @@
 // what the step actually cost; before a run they show Frankenstein's estimate.
 import { limbKind, limbInfo } from '../monsters/limbParts.js';
 import { frankensteinSpec } from '../ai/assistants.js';
+import { usd, usageDetail, addUsage } from '../core/money.js';
 
 export const TOOL = {
   web_search: { icon: '🔭', tool: 'Web search · Tavily' },
@@ -20,17 +21,13 @@ const SCRIPTED_LIMB = { gather: 'web_search', read: 'http_fetch', think: 'llm', 
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const human = (id) => String(id).replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
-const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
-
 function costText(u, estimate) {
   if (!u) return '';
-  const parts = [];
-  if (u.llm_tokens) parts.push(`${estimate ? '≤' : ''}${fmt(u.llm_tokens)} tok`);
-  if (u.credits) parts.push(`${estimate ? '≤' : ''}${fmt(u.credits)} cr`);
-  if (u.tts_chars) parts.push(`${fmt(u.tts_chars)} chars`);
-  if (u.images) parts.push(`${u.images} img`);
-  return parts.join(' · ') || (estimate ? 'free' : '0 tok');
+  if (!u.usd) return estimate ? 'free' : '$0';
+  return `${estimate ? '≤' : ''}${usd(u.usd)}`;
 }
+
+const costHtml = (u, estimate) => (u ? `<div class="wf-cost" title="${esc(usageDetail(u))}">${esc(costText(u, estimate))}</div>` : '');
 
 export class WorkflowView {
   constructor(el) {
@@ -118,12 +115,9 @@ export class WorkflowView {
     if (!def) return;
     const { rows, estimates, speaks } = this._rows(def);
     const run = this.live.get(def.id);
-    let total = { llm_tokens: 0, credits: 0 };
-    for (const s of [...(run?.steps.values() || []), { usage: run?.speechUsage }]) {
-      total.llm_tokens += s.usage?.llm_tokens || 0;
-      total.credits += s.usage?.credits || 0;
-    }
-    const estTotal = Object.values(estimates).reduce((a, u) => ({ llm_tokens: a.llm_tokens + (u.llm_tokens || 0), credits: a.credits + (u.credits || 0) }), { llm_tokens: 0, credits: 0 });
+    let total = {};
+    for (const s of [...(run?.steps.values() || []), { usage: run?.speechUsage }]) total = addUsage(total, s.usage);
+    const estTotal = Object.values(estimates).reduce((a, u) => addUsage(a, u), {});
     const head = run?.steps.size ? `this run: ${costText(total)}` : rows.length ? `per run: ${costText(estTotal, true)}` : '';
 
     const box = (b) => {
@@ -131,17 +125,17 @@ export class WorkflowView {
       const t = TOOL[kind] || TOOL.other;
       const live = run?.steps.get(b.id);
       const state = live?.state || 'idle';
-      const cost = live?.usage ? costText(live.usage) : costText(estimates[b.id], true);
+      const cost = live?.usage ? costHtml(live.usage) : costHtml(estimates[b.id], true);
       const tool = kind === 'forged' ? `${t.tool} · ${esc(b.limb.slice(7).replace(/_/g, ' '))}` : t.tool;
       return `<div class="wf-box" data-state="${state}" title="${esc(b.note || b.label)} — ${esc(limbInfo(b.limb).label)}">
         <div class="wf-icon">${t.icon}</div>
         <div class="wf-text"><b>${esc(b.label)}</b>${b.note ? `<span class="wf-note">${esc(b.note)}</span>` : ''}<small>${esc(tool)}</small>
           ${b.when ? `<em class="wf-tag">only if ${esc(b.when)}</em>` : ''}${b.each ? `<em class="wf-tag">× up to ${b.each}</em>` : ''}</div>
-        ${cost ? `<div class="wf-cost">${esc(cost)}</div>` : ''}
+        ${cost}
       </div>`;
     };
     const speakRow = speaks
-      ? `<div class="wf-row"><div class="wf-box" data-state="${run?.speech || 'idle'}"><div class="wf-icon">📯</div><div class="wf-text"><b>Speak the verdict</b><span class="wf-note">Rewritten for listening, then voiced</span><small>LLM · OpenAI → Voice · ElevenLabs</small></div><div class="wf-cost">${esc(run?.speechUsage ? costText(run.speechUsage) : costText(estimates.speech, true))}</div></div></div>`
+      ? `<div class="wf-row"><div class="wf-box" data-state="${run?.speech || 'idle'}"><div class="wf-icon">📯</div><div class="wf-text"><b>Speak the verdict</b><span class="wf-note">Rewritten for listening, then voiced</span><small>LLM · OpenAI → Voice · ElevenLabs</small></div>${run?.speechUsage ? costHtml(run.speechUsage) : costHtml(estimates.speech, true)}</div></div>`
       : '';
     const body = rows.length
       ? rows.map((row) => `<div class="wf-row${row.length > 1 ? ' wf-par' : ''}">${row.map(box).join('')}</div>`).join('') + speakRow

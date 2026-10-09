@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from .. import config, store
+from .. import config, pricing, store
 from ..openai_client import client, strictify
 from ..refs import literal_chars, template_refs
 from .base import Cost, Limb, LimbError
@@ -38,8 +38,9 @@ class LlmLimb(Limb):
     def estimate(self, args: dict) -> Cost:
         chars = literal_chars(args.get("prompt", "")) + literal_chars(args.get("system", ""))
         refs = len(template_refs(args.get("prompt", ""))) + len(template_refs(args.get("system", "")))
-        tokens = chars // 4 + refs * REF_TOKENS + OVERHEAD_TOKENS + int(args.get("max_tokens", 500))
-        return Cost(llm_tokens=tokens, seconds=self.seconds)
+        out = int(args.get("max_tokens", 500))
+        inp = chars // 4 + refs * REF_TOKENS + OVERHEAD_TOKENS
+        return Cost(llm_tokens=inp + out, usd=pricing.llm(config.RUNTIME_MODEL, inp, out), seconds=self.seconds)
 
     def validate_args(self, args, spec):
         errs = []
@@ -85,7 +86,13 @@ class LlmLimb(Limb):
             seed=7,
             **kwargs,
         )
-        ctx.charge(Cost(llm_tokens=resp.usage.total_tokens if resp.usage else self.precheck(args).llm_tokens))
+        if resp.usage:
+            used = Cost(llm_tokens=resp.usage.total_tokens,
+                        usd=pricing.llm(config.RUNTIME_MODEL, resp.usage.prompt_tokens, resp.usage.completion_tokens))
+        else:
+            n = self.precheck(args).llm_tokens
+            used = Cost(llm_tokens=n, usd=pricing.llm(config.RUNTIME_MODEL, n, 0))
+        ctx.charge(used)
         text = resp.choices[0].message.content or ""
         if schema:
             try:
