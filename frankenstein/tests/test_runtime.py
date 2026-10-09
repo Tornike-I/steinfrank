@@ -237,3 +237,32 @@ def test_done_events_carry_per_step_usage():
     r = run(spec, {})
     used = {e["step"]: e["usage"]["llm_tokens"] for e in r["log"] if e["event"] == "done"}
     assert used == {"a": 300, "b": 50, "c": 0}
+
+
+def test_speech_rewrite_never_blocks_tts(monkeypatch):
+    from frankenstein import safety, speech
+    from frankenstein.limbs import REGISTRY
+
+    async def fake_speakable(text, report=""):
+        return "Rewritten.", 300
+
+    class FakeTts(Limb):
+        name = "tts"
+
+        async def run(self, args, ctx):
+            ctx.charge(Cost(tts_chars=len(args["text"])))
+            return {"url": "http://x/speech.mp3"}
+
+    monkeypatch.setattr(speech, "speakable", fake_speakable)
+    monkeypatch.setattr(safety, "available", lambda: True)
+
+    async def no_flags(text):
+        return []
+
+    monkeypatch.setattr(safety, "moderate", no_flags)
+    monkeypatch.setitem(REGISTRY, "tts", FakeTts())
+    spec = make([{"id": "a", "limb": "echo", "args": {"x": 1}}], output={"speech": "Raw https://x.com", "report": "r"},
+                policy={"max_llm_tokens": 0, "max_tts_chars": 2000})
+    r = run(spec, {})
+    assert r["output"]["speech"] == "Rewritten." and r["output"]["speech_audio_url"] == "http://x/speech.mp3"
+    assert r["usage"]["llm_tokens"] == 300

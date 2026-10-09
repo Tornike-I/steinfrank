@@ -17,7 +17,7 @@ import { SPOTS } from './lab/constants.js';
 import { animateMonster } from './monsters/monsterAnim.js';
 import { randomSeed } from './core/rng.js';
 import * as P from './lab/props.js';
-import { themeOf } from './monsters/themes.js';
+import { titleOf } from './monsters/registry.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const CANCEL = Symbol('cancel');
@@ -141,7 +141,7 @@ export class Director {
     }
     this._shot('summon', { speed: 2.6 });
     await this.creatures.summon(
-      { seed: def.seed, theme: def.theme, defId: def.id, name: themeLabel(def), limbs: def.limbs || [] },
+      { seed: def.seed, theme: def.theme, defId: def.id, name: titleOf(def), limbs: def.limbs || [], form: def.form || 1 },
       {
         onScream: () => {
           this.sfx.play('scream');
@@ -357,7 +357,7 @@ export class Director {
     this._shot('floor', { speed: 2.0 });
     this.sfx.play('squeak');
     this.reveal = null;
-    const rec = { id: op.monsterId, seed: op.seed, defId: op.def.id, theme: op.def.theme, name: themeLabel(op.def), limbs: op.def.limbs || [], form: op.def.form || 1 };
+    const rec = { id: op.monsterId, seed: op.seed, defId: op.def.id, theme: op.def.theme, name: titleOf(op.def), limbs: op.def.limbs || [], form: op.def.form || 1 };
     this.sci.obstacles = [TABLE_BOX]; // the monster is leaving the slab
     const landed = this.creatures.adopt(rec, patient);
     this.onMonsterBorn?.(rec);
@@ -515,4 +515,3 @@ export class Director {
 
 function epoch_ok(e, d) { return e === d.epoch; }
 
-const themeLabel = (def) => themeOf(def.theme).label;

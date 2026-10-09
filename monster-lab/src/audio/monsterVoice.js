@@ -24,8 +24,8 @@ class MonsterVoice {
     this.ctx.resume();
   }
 
-  _play(url, { voiced = false, loop = false, volume = 1 } = {}) {
-    if (!url || !state.settings.sound) return null;
+  _play(url, { voiced = false, loop = false, volume = 1, force = false } = {}) {
+    if (!url || (!state.settings.sound && !force)) return null;
     this._ensure();
     const el = new Audio();
     el.crossOrigin = 'anonymous';
@@ -48,16 +48,17 @@ class MonsterVoice {
     el?.addEventListener('error', done);
   }
 
-  speak(url) {
+  // `force` plays even with sound muted (an explicit click on the message).
+  speak(url, force = false) {
     const scene = this.sceneEl;
     if (scene && !scene.paused && !scene.ended && !scene.error) {
-      const go = () => { scene.removeEventListener('error', go); scene.removeEventListener('ended', go); this.speak(url); };
+      const go = () => { scene.removeEventListener('error', go); scene.removeEventListener('ended', go); this.speak(url, force); };
       scene.addEventListener('ended', go);
       scene.addEventListener('error', go);
       return;
     }
     this.speaking?.pause();
-    const el = this._play(url, { voiced: true });
+    const el = this._play(url, { voiced: true, force });
     if (!el) return;
     this.speaking = el;
     this._duck(true);

@@ -4,7 +4,7 @@
 // Prompts submitted during cleanup wait until the hose is done.
 import { state, save } from '../core/store.js';
 import { matchTheme, themeOf } from '../monsters/themes.js';
-import { draftAssistant, commitAssistant } from '../monsters/registry.js';
+import { draftAssistant, commitAssistant, allMonsters } from '../monsters/registry.js';
 import { limbLabel } from '../monsters/limbParts.js';
 import * as F from '../ai/frankenstein.js';
 import { monsterVoice } from '../audio/monsterVoice.js';
@@ -42,6 +42,7 @@ export class LabController {
 
   init() {
     this.creatures.restore(state.labCreatures || []);
+    this.creatures.sync(allMonsters());
     setInterval(() => this.persistCreatures(), 2000);
     setTimeout(() => { if (state.mode === 'lab') this.director.maybeCleanup(); }, 1500);
   }
@@ -125,6 +126,7 @@ export class LabController {
   }
 
   onCleanupDone() {
+    this.creatures.sync(allMonsters());
     this.persistCreatures();
     const q = this.queued;
     this.queued = null;

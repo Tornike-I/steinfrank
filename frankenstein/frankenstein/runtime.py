@@ -284,12 +284,13 @@ class Runner:
         output = render(spec.output, data)
         speech = clip_speech(output.get("speech", ""))
         # Template-built speech can contain URLs and symbols that TTS reads out literally.
+        rewrite = Cost()
         if spec.speak and speech and safety.available():
             try:
                 speech, used = await speech_mod.speakable(speech, _text_of(output.get("report", "")))
                 speech = clip_speech(speech)
-                run["usage"] = (Cost(**run["usage"]) + Cost(llm_tokens=used)).as_dict()
-                run["log"].append({"step": "speech", "event": "rewritten", "usage": Cost(llm_tokens=used).as_dict()})
+                rewrite = Cost(llm_tokens=used)
+                run["log"].append({"step": "speech", "event": "rewritten", "usage": rewrite.as_dict()})
             except Exception as e:
                 run["log"].append({"step": "speech", "event": "error", "detail": f"rewrite: {e}"})
         output["speech"] = speech
@@ -309,6 +310,8 @@ class Runner:
                 run["usage"] = ctx.usage.as_dict()
             except Exception as e:
                 run["log"].append({"step": "speech", "event": "error", "detail": str(e)})
+        # Added after the TTS budget check: older specs' llm budgets don't include the rewrite.
+        run["usage"] = (Cost(**run["usage"]) + rewrite).as_dict()
         run["output"] = output
         run["status"] = "completed"
         if run["notify_on_complete"] and not self.dry_run:

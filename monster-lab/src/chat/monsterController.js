@@ -149,6 +149,7 @@ export class MonsterController {
           this.decisions.set(msg.id, ev.decide);
         } else if (ev.type === 'speech') {
           msg.speech = ev.text;
+          msg.audio = ev.audio || null;
           this.wf?.speech(def, ev.usage);
           monsterVoice.stopLoop();
           if (live()) monsterVoice.sound(sounds?.done);

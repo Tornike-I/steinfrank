@@ -6,6 +6,7 @@ import { renderMarkdown } from './markdown.js';
 import { allMonsters, titleOf } from '../monsters/registry.js';
 import { themeOf } from '../monsters/themes.js';
 import { backend } from '../ai/frankenstein.js';
+import { monsterVoice } from '../audio/monsterVoice.js';
 
 const GREETINGS = ['What shall we build tonight?', 'Name a chore. I have spare parts.', 'Every tedious job deserves a monster.', 'Describe the job. I will stitch the beast.'];
 
@@ -290,10 +291,11 @@ export class ChatUI {
           : `<div class="note">${c.state === 'approved' ? 'Approved.' : c.state === 'declined' ? 'Declined — it will do without.' : 'No longer waiting.'}</div>`)
         + (c.error ? `<div class="note error">${esc(c.error)}</div>` : '') + '</div>';
     }
-    if (m.speech) html += `<div class="speech">“${esc(m.speech)}”</div>`;
+    if (m.speech) html += `<div class="speech">“${esc(m.speech)}”${m.audio ? '<button type="button" class="hear" title="Play the spoken answer">▶ Hear it</button>' : ''}</div>`;
     if (m.content || !running) html += renderMarkdown(m.content || '') + (m.status === 'streaming' && m.content ? '<span class="caret"></span>' : '');
     body.innerHTML = html;
     body.querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', () => this.mon.decide(m.id, b.dataset.approve === '1')));
+    body.querySelector('.hear')?.addEventListener('click', () => monsterVoice.speak(m.audio, true));
     const foot = row.querySelector('.msg-foot');
     foot.innerHTML = '';
     if (m.status === 'stopped') foot.insertAdjacentHTML('beforeend', '<span class="note">Stopped.</span>');

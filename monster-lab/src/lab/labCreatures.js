@@ -5,7 +5,7 @@
 // World units are metres; the floor is y = 0.
 import * as THREE from 'three';
 import { setPallor, setDeadEyes, disposeMonster } from '../monsters/monsterGen.js';
-import { buildFor } from '../monsters/registry.js';
+import { buildFor, titleOf } from '../monsters/registry.js';
 import { animateMonster, hopHeight } from '../monsters/monsterAnim.js';
 import { blood as bloodMat } from '../three/materials.js';
 
@@ -87,6 +87,28 @@ export class LabCreatures {
       c.yaw = c.yawT = s.yaw || 0;
       if (s.state === 'dead') this._makeCorpse(c, s.side ?? 1, true);
       this._place(c);
+    }
+  }
+
+  // The floor shows every built monster: missing ones (e.g. after a cleanup)
+  // wander back in, and name tags follow the monster's title.
+  sync(defs) {
+    for (const def of defs) {
+      const title = titleOf(def);
+      const c = [...this.creatures.values()].find((x) => x.defId === def.id && x.state === 'alive' && !x.temporary);
+      if (c) {
+        if (c.name !== title) {
+          if (c.label) c.group.remove(c.label);
+          c.name = title;
+          c.label = makeLabel(title);
+          c.group.add(c.label);
+        }
+        continue;
+      }
+      const n = this._make({ id: `w-${def.id}-${Date.now().toString(36)}`, seed: def.seed, defId: def.id, theme: def.theme, name: title, limbs: def.limbs || [], form: def.form || 1 });
+      n.pos.copy(this._freeSpot(this._randomPoint(), 0.45));
+      n.yaw = n.yawT = Math.random() * 6.28;
+      this._place(n);
     }
   }
 
