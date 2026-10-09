@@ -161,23 +161,14 @@ full-screen lab.
   wrist targets, hand orientations, feet targets, spine lean and twist, look
   target, jaw, brows and blink. Tool tips are placed exactly via
   `wristFor(tip)`. Poses blend on action change.
-- Smooth beats perfect: brief contact is preferred to arms that jerk or
-  stick out. Elbows point along one of `ELBOW_POLES` (tucked down and back
-  first, then a little further out in small steps, then out, lifted or
-  forward), picked as the first that keeps the arm clear of the table, the
-  patient and his head (not his own coat: avoiding his belly held the arms
-  out like wings), and always eased toward from last frame's direction,
-  never snapped (no "chicken" flapping). Hands stay on their marks; nothing
-  shoves them clear.
-- Collision: after the arm IK, `_settleHands()` checks the real glove
-  geometry (a 3×3 palm grid, finger segments and thumb) against the table,
-  the patient, his face (an ellipsoid fitted to his egg-shaped cranium, the
-  loupe and nose) and the other glove, nudging the hands at most ~1.2 m/s
-  (the nudge carries over frames and fades, so rubbing palms touch without
-  overlapping). Gloves may rest against his coat. If an arm would pass
-  through his head he straightens his back and then tips his head, easing
-  in and letting go slowly. While walking he holds his hands up in front
-  like a surgeon who has just scrubbed in, and turns over at least ~0.35 s.
+- Collision: hands are kept out of the table, the patient and his own body
+  (spheres on his bones, an ellipsoid fitted to his egg-shaped cranium, the
+  loupe and nose). After the arm IK, `_settleHands()` checks the real glove
+  geometry (a 3×3 palm grid, finger segments and thumb) against all of that
+  and against the other glove, nudging the hands apart (the nudge carries
+  over frames, so rubbing palms touch without overlapping). If an arm would
+  pass through his head he straightens his back and then tips his head,
+  easing in within a few frames and letting go slowly.
 - Face: head look-at, brows, jaw and blinks are eased, so actions that switch
   them outright never make the eyes and brows glitch.
 - Actions: `idle`, `greet`, `snap`, `walk` (planted alternating feet),
