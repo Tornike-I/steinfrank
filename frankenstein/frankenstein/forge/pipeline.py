@@ -150,9 +150,17 @@ async def forge(description: str, max_repairs: int = 4) -> ForgeResult:
     errors: list[str] = []
     warnings: list[str] = []
     best: tuple[MonsterSpec, list[str]] | None = None
+    pushed_back = False
     for attempt in range(max_repairs + 1):
         if "refuse" in raw:
-            return ForgeResult("refused", reason=str(raw["refuse"]), design_tokens=designer.usage)
+            # The safety screen already allowed this; the designer gets one push back before a refusal stands.
+            if pushed_back:
+                return ForgeResult("refused", reason=str(raw["refuse"]), design_tokens=designer.usage)
+            pushed_back = True
+            raw = await designer.repair(
+                [f"You refused ({raw['refuse']}), but this request passed the dedicated safety review as an ordinary "
+                 "task. Build the spec; refuse again only if it is clearly in a harmful category."], "the safety review")
+            continue
         spec, errors = await check(raw, agents)
         stage = "validation"
         if not errors:

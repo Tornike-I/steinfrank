@@ -30,6 +30,14 @@ THE DEFAULT SHAPE (use it unless the task clearly needs something else):
   compose step must say plainly what could not be fetched or read ("I couldn't get the forecast for London") and
   give no confident verdict; judge/score steps must never count a failed fetch or missing data as evidence.
   Normalize user input before using it (e.g. add https:// to a bare domain, trim spaces).
+  When verify finds the essential data missing and a paid agent in the catalog could supply it (e.g. an agent that
+  reads the product page itself), escalate to that agent instead of giving up with a weak verdict.
+- Fetched pages are localized to where the server runs (Czech Republic): prices may be in CZK, EUR, USD or others,
+  with local number formats. Picking the right number out of a big shop or article page (the item price, not
+  shipping, fees or other products) needs an llm step on the trimmed page text with an output_schema
+  ({title, price, currency}); regexes grab the wrong figure. To compare with a budget in another currency, fetch the
+  rate with http_fetch from https://open.er-api.com/v6/latest/<CURRENCY> (free, JSON: rates.<CODE>) and convert in a
+  forged step.
 
 OUTPUT: one JSON object, the monster spec:
 {

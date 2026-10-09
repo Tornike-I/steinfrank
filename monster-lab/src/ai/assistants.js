@@ -48,7 +48,10 @@ export function mapInputs(schema, text) {
   if (names.length > 1) {
     for (const part of t.split(/\n|;|·/)) {
       const m = part.match(/^\s*([\w -]+?)\s*[:=]\s*(.+)$/);
-      const key = m && names.find((n) => n.toLowerCase() === m[1].trim().toLowerCase().replace(/ /g, '_'));
+      const typed = m && m[1].trim().toLowerCase().replace(/[ -]/g, '_');
+      // "budget" should fill "budget_usd": exact name first, then a unique name that starts with it.
+      const key = m && (names.find((n) => n.toLowerCase() === typed)
+        || [names.filter((n) => n.toLowerCase().startsWith(typed) || typed.startsWith(n.toLowerCase()))].find((c) => c.length === 1)?.[0]);
       if (key) out[key] = coerce(props[key], m[2].trim());
     }
     if (Object.keys(out).length) return out;
@@ -61,7 +64,12 @@ export function mapInputs(schema, text) {
   return out;
 }
 
-const coerce = (p, v) => (p?.type === 'number' || p?.type === 'integer' ? Number(v) : p?.type === 'boolean' ? /^(true|yes|1)$/i.test(v) : v);
+// Numbers may arrive as "$500", "1,200" or a range like "500-1000$"; a range gives its upper bound.
+const toNumber = (v) => {
+  const nums = String(v).replace(/,/g, '').match(/\d+(?:\.\d+)?/g);
+  return nums ? Math.max(...nums.map(Number)) : v;
+};
+const coerce = (p, v) => (p?.type === 'number' || p?.type === 'integer' ? toNumber(v) : p?.type === 'boolean' ? /^(true|yes|1)$/i.test(v) : v);
 
 const specCache = new Map();
 
