@@ -1,0 +1,386 @@
+{
+  "id": "travel-assistant-monster",
+  "name": "Travel Assistant Monster",
+  "version": 3,
+  "purpose": "Answer travel questions, including packing lists, with a short spoken verdict and a detailed report.",
+  "persona": "A blunt, reliable travel guide with a no-nonsense tone.",
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "question": {
+        "type": "string",
+        "description": "The user's travel request, including destination and dates if relevant.",
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "question"
+    ]
+  },
+  "policy": {
+    "allowed_domains": [
+      "*"
+    ],
+    "max_credits": 0,
+    "max_llm_tokens": 4600,
+    "max_steps": 7,
+    "max_images": 0,
+    "max_tts_chars": 900,
+    "max_notifications": 0
+  },
+  "steps": [
+    {
+      "id": "parse",
+      "limb": "llm",
+      "args": {
+        "prompt": "Extract structured travel intent from the user's request. Return only valid JSON matching the schema. Use empty strings or null where unknown. Do not add markdown.\n\nUser question: {{inputs.question}}",
+        "max_tokens": 180,
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "travel_related": {
+              "type": "boolean"
+            },
+            "task": {
+              "type": "string"
+            },
+            "destination": {
+              "type": "string"
+            },
+            "start_date": {
+              "type": "string"
+            },
+            "end_date": {
+              "type": "string"
+            },
+            "date_text": {
+              "type": "string"
+            },
+            "trip_length_days": {
+              "type": "integer"
+            },
+            "traveler_profile": {
+              "type": "string"
+            },
+            "needs_packing_list": {
+              "type": "boolean"
+            },
+            "needs_date_help": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "travel_related",
+            "task",
+            "destination",
+            "start_date",
+            "end_date",
+            "date_text",
+            "trip_length_days",
+            "traveler_profile",
+            "needs_packing_list",
+            "needs_date_help"
+          ]
+        }
+      },
+      "note": "Read the travel request and extract the fields needed for downstream logic"
+    },
+    {
+      "id": "gather",
+      "args": {},
+      "parallel": [
+        {
+          "id": "weather_search",
+          "limb": "web_search",
+          "args": {
+            "query": "{{steps.parse.destination}} weather forecast travel packing advice",
+            "max_results": 3
+          },
+          "when": "steps.parse.travel_related == true and steps.parse.destination != ''",
+          "note": "Find weather context when a destination is provided"
+        },
+        {
+          "id": "travel_search",
+          "limb": "web_search",
+          "args": {
+            "query": "{{inputs.question}} travel packing list destination dates",
+            "max_results": 3
+          },
+          "when": "steps.parse.travel_related == true",
+          "note": "Find relevant travel snippets for packing and trip context"
+        }
+      ],
+      "note": ""
+    },
+    {
+      "id": "verify",
+      "limb": "forged:verify_gathered_travel_data",
+      "args": {
+        "travel_related": "{{steps.parse.travel_related}}",
+        "destination": "{{steps.parse.destination}}",
+        "weather_results": "{{steps.gather.weather_search.results}}",
+        "travel_results": "{{steps.gather.travel_search.results}}"
+      },
+      "note": "Check that the needed travel data actually arrived"
+    },
+    {
+      "id": "extract",
+      "limb": "llm",
+      "args": {
+        "prompt": "You are a travel assistant. Use only the provided source snippets and the user's request.\nReturn only valid JSON matching the schema. Every string field must be plain text with no unescaped line breaks.\nIf the request is travel-related and asks for a packing list, produce a short spoken verdict first, then the concrete packing items in the same speech field. Keep the speech to 2-5 short sentences and make the first sentence the verdict. Include actual item names, not a lead-in.\nIf data is missing, say what is missing and do not invent specifics.\nDo not answer non-travel requests; instead set a polite refusal.\n\nUser question:\n{{inputs.question}}\n\nExtracted fields:\n{{steps.parse}}\n\nWeather/search snippets:\n{{steps.gather}}\n\nVerification:\n{{steps.verify}}",
+        "max_tokens": 420,
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "answer_type": {
+              "type": "string"
+            },
+            "speech": {
+              "type": "string"
+            },
+            "report": {
+              "type": "string"
+            },
+            "refusal": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "answer_type",
+            "speech",
+            "report",
+            "refusal"
+          ]
+        }
+      },
+      "when": "steps.parse.travel_related == true and steps.verify.ok == true",
+      "note": "Write the actual travel answer from the gathered facts"
+    },
+    {
+      "id": "decline",
+      "limb": "forged:refuse_non_travel",
+      "args": {
+        "travel_related": "{{steps.parse.travel_related}}",
+        "question": "{{inputs.question}}",
+        "destination": "{{steps.parse.destination}}",
+        "verify_ok": "{{steps.verify.ok}}",
+        "answer": "{{steps.extract.speech}}"
+      },
+      "note": "Produce a polite refusal or a missing-data fallback"
+    },
+    {
+      "id": "compose",
+      "limb": "forged:compose_travel_output",
+      "args": {
+        "travel_related": "{{steps.parse.travel_related}}",
+        "verify_ok": "{{steps.verify.ok}}",
+        "answer_type": "{{steps.extract.answer_type}}",
+        "speech": "{{steps.extract.speech}}",
+        "report": "{{steps.extract.report}}",
+        "refusal": "{{steps.extract.refusal}}",
+        "decline_speech": "{{steps.decline.speech}}",
+        "decline_report": "{{steps.decline.report}}",
+        "question": "{{inputs.question}}",
+        "destination": "{{steps.parse.destination}}",
+        "start_date": "{{steps.parse.start_date}}",
+        "end_date": "{{steps.parse.end_date}}",
+        "trip_length_days": "{{steps.parse.trip_length_days}}"
+      },
+      "note": "Always produce final spoken verdict and report"
+    }
+  ],
+  "output": {
+    "speech": "{{steps.compose.speech}}",
+    "report": "{{steps.compose.report}}",
+    "memory": {}
+  },
+  "speak": true,
+  "forged_limbs": [
+    {
+      "name": "verify_gathered_travel_data",
+      "description": "Check that travel search data exists and the essential fields are usable; if missing, flag problems without treating missing data as evidence.",
+      "code": "def run(travel_related, destination, weather_results, travel_results):\n    problems = []\n    ok = True\n    if not travel_related:\n        return {'ok': False, 'problems': ['request is not travel-related']}\n    if not isinstance(destination, str) or not destination.strip():\n        problems.append('missing destination')\n        ok = False\n    if not weather_results or not isinstance(weather_results, list):\n        problems.append('missing weather search results')\n        ok = False\n    if not travel_results or not isinstance(travel_results, list):\n        problems.append('missing travel search results')\n        ok = False\n    return {'ok': ok, 'problems': problems}\n",
+      "tests": [
+        {
+          "args": {
+            "travel_related": true,
+            "destination": "Prague",
+            "weather_results": [
+              {
+                "title": "x",
+                "url": "u",
+                "content": "c"
+              }
+            ],
+            "travel_results": [
+              {
+                "title": "x",
+                "url": "u",
+                "content": "c"
+              }
+            ]
+          },
+          "expect": {
+            "ok": true,
+            "problems": []
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "travel_related": true,
+            "destination": "",
+            "weather_results": [],
+            "travel_results": null
+          },
+          "expect": {
+            "ok": false,
+            "problems": [
+              "missing destination",
+              "missing weather search results",
+              "missing travel search results"
+            ]
+          },
+          "contains": {}
+        }
+      ]
+    },
+    {
+      "name": "refuse_non_travel",
+      "description": "Politely decline non-travel requests, otherwise provide a missing-data fallback when verification failed.",
+      "code": "def run(travel_related, question, destination, verify_ok, answer):\n    if not travel_related:\n        return {'speech': 'Sorry, I only help with travel questions.', 'report': '## Refusal\\n\\nThe request was not travel-related.', 'reason': 'non-travel'}\n    if not verify_ok:\n        dest = destination or 'the destination'\n        return {'speech': f'I could not fully verify the travel details for {dest}.', 'report': '## Missing data\\n\\nSome needed travel details were not available, so I could not give a confident travel answer.', 'reason': 'missing-data'}\n    return {'speech': answer or '', 'report': '', 'reason': 'handled'}\n",
+      "tests": [
+        {
+          "args": {
+            "travel_related": false,
+            "question": "Write spam",
+            "destination": "",
+            "verify_ok": false,
+            "answer": null
+          },
+          "expect": {
+            "reason": "non-travel"
+          },
+          "contains": {
+            "speech": [
+              "only help with travel"
+            ]
+          }
+        },
+        {
+          "args": {
+            "travel_related": true,
+            "question": "Pack for Rome",
+            "destination": "Rome",
+            "verify_ok": false,
+            "answer": null
+          },
+          "expect": {
+            "reason": "missing-data"
+          },
+          "contains": {
+            "speech": [
+              "could not fully verify",
+              "Rome"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "compose_travel_output",
+      "description": "Combine the travel answer with a clean spoken verdict and markdown report.",
+      "code": "def run(travel_related, verify_ok, answer_type, speech, report, refusal, decline_speech, decline_report, question, destination, start_date, end_date, trip_length_days):\n    if not travel_related:\n        return {'speech': decline_speech, 'report': decline_report}\n    if not verify_ok:\n        return {'speech': decline_speech, 'report': decline_report}\n    final_speech = speech or 'I have your travel answer.'\n    final_report = report or '## Travel answer\\n\\nNo report was returned.'\n    return {'speech': final_speech, 'report': final_report}\n",
+      "tests": [
+        {
+          "args": {
+            "travel_related": false,
+            "verify_ok": false,
+            "answer_type": "x",
+            "speech": "x",
+            "report": "x",
+            "refusal": true,
+            "decline_speech": "No.",
+            "decline_report": "## R",
+            "question": "x",
+            "destination": "",
+            "start_date": "",
+            "end_date": "",
+            "trip_length_days": 0
+          },
+          "expect": {
+            "speech": "No.",
+            "report": "## R"
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "travel_related": true,
+            "verify_ok": true,
+            "answer_type": "packing_list",
+            "speech": "Pack a rain jacket.",
+            "report": "## Pack",
+            "refusal": false,
+            "decline_speech": "",
+            "decline_report": "",
+            "question": "x",
+            "destination": "Prague",
+            "start_date": "",
+            "end_date": "",
+            "trip_length_days": 0
+          },
+          "expect": {
+            "speech": "Pack a rain jacket.",
+            "report": "## Pack"
+          },
+          "contains": {}
+        }
+      ]
+    }
+  ],
+  "examples": [
+    {
+      "question": "Make a packing list for my trip to Prague from 2026-05-10 to 2026-05-14"
+    },
+    {
+      "question": "What should I pack for a week in Lisbon in October?"
+    }
+  ],
+  "estimate": {
+    "min": {
+      "llm_tokens": 1255,
+      "credits": 0.0,
+      "seconds": 6.6,
+      "images": 0,
+      "tts_chars": 100,
+      "usd": 0.010285
+    },
+    "max": {
+      "llm_tokens": 3479,
+      "credits": 0.0,
+      "seconds": 11.6,
+      "images": 0,
+      "tts_chars": 900,
+      "usd": 0.106633
+    }
+  },
+  "safety": {
+    "verdict": "allow",
+    "notes": "This is a general travel assistant workflow for ordinary planning and information tasks, with no disallowed harmful purpose."
+  },
+  "voice": {
+    "elevenlabs_agent_id": "agent_2301m4f8dzg4f1btver55e7d2021",
+    "first_message": "Tell me the trip details, and I’ll sort the travel answer.",
+    "archetype": "brute",
+    "language": "en",
+    "cast": [],
+    "voice_id": "aUQ7479veThpgpsg8t1j",
+    "sounds": {
+      "arrive": "/artifacts/monsters/travel-assistant-monster/v3/arrive.mp3",
+      "working": "/artifacts/monsters/travel-assistant-monster/v3/working.mp3",
+      "done": "/artifacts/monsters/travel-assistant-monster/v3/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/travel-assistant-monster/v3/birth.mp3"
+  }
+}
