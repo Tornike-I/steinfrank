@@ -47,7 +47,8 @@ class SokosumiLimb(Limb):
     async def poll(self, state, ctx):
         job = await sokosumi.get_job(state["job_id"])
         status = job["status"]
-        if status == "completed":
+        # Sokosumi can report "payment_pending" after the agent has delivered; the result is final by then.
+        if status == "completed" or (job.get("result") and job.get("completedAt") and status not in FAILED):
             n = float(job.get("credits") or 0)
             ctx.charge(Cost(credits=n, usd=pricing.credits(n)))
             try:

@@ -266,3 +266,17 @@ def test_speech_rewrite_never_blocks_tts(monkeypatch):
     r = run(spec, {})
     assert r["output"]["speech"] == "Rewritten." and r["output"]["speech_audio_url"] == "http://x/speech.mp3"
     assert r["usage"]["llm_tokens"] == 300
+
+
+def test_sokosumi_payment_pending_with_result_counts_as_done(monkeypatch):
+    from frankenstein import sokosumi
+    from frankenstein.limbs.sokosumi_job import SokosumiLimb
+
+    async def fake_get_job(job_id):
+        return {"id": job_id, "status": "payment_pending", "credits": 60, "result": "**Done**", "completedAt": "2026-10-09T01:57:41Z"}
+
+    monkeypatch.setattr(sokosumi, "get_job", fake_get_job)
+    spec = make([{"id": "a", "limb": "echo", "args": {}}], policy={"max_credits": 100})
+    from frankenstein.limbs import RunContext
+    out = asyncio.run(SokosumiLimb().poll({"job_id": "j1", "agent_id": "x"}, RunContext("r", "a", spec)))
+    assert isinstance(out, dict) and out["result"] == "**Done**"
