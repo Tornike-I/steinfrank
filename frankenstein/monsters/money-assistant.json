@@ -1,0 +1,407 @@
+{
+  "id": "money-assistant",
+  "name": "Money Assistant",
+  "version": 1,
+  "purpose": "Answer money-related questions with a focus on cryptocurrency price movement and whether the move looks unusual.",
+  "persona": "A quick, shrewd gremlin who handles money questions briskly.",
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "question": {
+        "type": "string",
+        "description": "The user's request about money.",
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "question"
+    ]
+  },
+  "policy": {
+    "allowed_domains": [
+      "*"
+    ],
+    "max_credits": 0,
+    "max_llm_tokens": 1800,
+    "max_steps": 8,
+    "max_images": 0,
+    "max_tts_chars": 900,
+    "max_notifications": 0
+  },
+  "steps": [
+    {
+      "id": "parse",
+      "limb": "llm",
+      "args": {
+        "prompt": "Read the user's money-related question and extract the exact fields needed for a money assistant. If the request is about a cryptocurrency price move, return JSON with: task, crypto_name, crypto_id, quote_currency, region, time_window, and is_money_topic. Use crypto_id only when you can infer a standard CoinGecko id, otherwise leave it empty. If the request is not about money, set is_money_topic to false and task to 'other'. Question: {{inputs.question}}",
+        "max_tokens": 180,
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string"
+            },
+            "crypto_name": {
+              "type": "string"
+            },
+            "crypto_id": {
+              "type": "string"
+            },
+            "quote_currency": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string"
+            },
+            "time_window": {
+              "type": "string"
+            },
+            "is_money_topic": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "task",
+            "crypto_name",
+            "crypto_id",
+            "quote_currency",
+            "region",
+            "time_window",
+            "is_money_topic"
+          ]
+        }
+      },
+      "note": "Classify the user's request and extract crypto fields when relevant."
+    },
+    {
+      "id": "normalize",
+      "limb": "forged:normalize_money_request",
+      "args": {
+        "question": "{{inputs.question}}",
+        "task": "{{steps.parse.task}}",
+        "crypto_name": "{{steps.parse.crypto_name}}",
+        "crypto_id": "{{steps.parse.crypto_id}}",
+        "quote_currency": "{{steps.parse.quote_currency}}",
+        "region": "{{steps.parse.region}}",
+        "time_window": "{{steps.parse.time_window}}",
+        "is_money_topic": "{{steps.parse.is_money_topic}}"
+      },
+      "note": "Clean and constrain the extracted request."
+    },
+    {
+      "id": "gather",
+      "args": {},
+      "parallel": [
+        {
+          "id": "price",
+          "limb": "http_fetch",
+          "args": {
+            "url": "https://api.coingecko.com/api/v3/simple/price?ids={{steps.normalize.crypto_id}}&vs_currencies=usd&include_24hr_change=true",
+            "max_chars": 4000
+          },
+          "when": "steps.normalize.is_crypto and steps.normalize.crypto_id != ''",
+          "note": "Fetch current crypto price and 24h change from CoinGecko."
+        },
+        {
+          "id": "news",
+          "limb": "web_search",
+          "args": {
+            "query": "{{steps.normalize.crypto_name}} crypto price today unusual move news",
+            "max_results": 5
+          },
+          "when": "steps.normalize.is_crypto and steps.normalize.crypto_name != ''",
+          "note": "Look for recent context about the move."
+        }
+      ],
+      "note": ""
+    },
+    {
+      "id": "verify",
+      "limb": "forged:verify_money_data",
+      "args": {
+        "task": "{{steps.normalize.task}}",
+        "is_money_topic": "{{steps.normalize.is_money_topic}}",
+        "crypto_name": "{{steps.normalize.crypto_name}}",
+        "crypto_id": "{{steps.normalize.crypto_id}}",
+        "price_json": "{{steps.gather.price.json}}",
+        "price_status": "{{steps.gather.price.status}}",
+        "news_results": "{{steps.gather.news.results}}"
+      },
+      "note": "Check that the essential data arrived and is usable."
+    },
+    {
+      "id": "judge",
+      "limb": "forged:judge_money_answer",
+      "args": {
+        "task": "{{steps.normalize.task}}",
+        "is_money_topic": "{{steps.normalize.is_money_topic}}",
+        "crypto_name": "{{steps.normalize.crypto_name}}",
+        "crypto_id": "{{steps.normalize.crypto_id}}",
+        "price_json": "{{steps.gather.price.json}}",
+        "price_status": "{{steps.gather.price.status}}",
+        "news_results": "{{steps.gather.news.results}}",
+        "verify_ok": "{{steps.verify.ok}}",
+        "verify_problems": "{{steps.verify.problems}}"
+      },
+      "note": "Apply a fixed rubric for whether the move looks unusual."
+    },
+    {
+      "id": "compose",
+      "limb": "forged:compose_money_report",
+      "args": {
+        "question": "{{inputs.question}}",
+        "task": "{{steps.normalize.task}}",
+        "crypto_name": "{{steps.normalize.crypto_name}}",
+        "crypto_id": "{{steps.normalize.crypto_id}}",
+        "price_json": "{{steps.gather.price.json}}",
+        "price_status": "{{steps.gather.price.status}}",
+        "news_results": "{{steps.gather.news.results}}",
+        "verify_ok": "{{steps.verify.ok}}",
+        "verify_problems": "{{steps.verify.problems}}",
+        "judge_score": "{{steps.judge.score}}",
+        "judge_verdict": "{{steps.judge.verdict}}",
+        "judge_reasons": "{{steps.judge.reasons}}",
+        "answer_text": "{{steps.judge.answer_text}}"
+      },
+      "note": "Build the spoken verdict and the markdown report."
+    }
+  ],
+  "output": {
+    "speech": "{{steps.compose.speech}}",
+    "report": "{{steps.compose.report}}",
+    "memory": {}
+  },
+  "speak": true,
+  "forged_limbs": [
+    {
+      "name": "normalize_money_request",
+      "description": "Normalize a money question and derive safe fields for crypto lookup or polite decline.",
+      "code": "def run(question, task, crypto_name, crypto_id, quote_currency, region, time_window, is_money_topic):\n    q = (question or '').strip()\n    ql = q.lower()\n    money_words = ['price', 'crypto', 'bitcoin', 'eth', 'ethereum', 'coin', 'usd', 'eur', 'exchange rate', 'rate', 'portfolio', 'budget', 'money', 'investment']\n    money_topic = bool(is_money_topic) or any(w in ql for w in money_words)\n    is_crypto = 'crypto' in ql or 'bitcoin' in ql or 'ethereum' in ql or crypto_name not in ('', None) or crypto_id not in ('', None)\n    name = (crypto_name or '').strip()\n    cid = (crypto_id or '').strip()\n    qc = (quote_currency or 'usd').strip().lower() or 'usd'\n    if qc not in ['usd', 'eur', 'czk', 'gbp']:\n        qc = 'usd'\n    tw = (time_window or '').strip() or 'today'\n    reg = (region or '').strip()\n    if not reg:\n        reg = 'global'\n    if not name and is_crypto:\n        if 'bitcoin' in ql:\n            name, cid = 'Bitcoin', 'bitcoin'\n        elif 'ethereum' in ql:\n            name, cid = 'Ethereum', 'ethereum'\n        elif 'solana' in ql:\n            name, cid = 'Solana', 'solana'\n    return {\n        'question': q,\n        'task': (task or 'other').strip() or 'other',\n        'crypto_name': name,\n        'crypto_id': cid,\n        'quote_currency': qc,\n        'region': reg,\n        'time_window': tw,\n        'is_money_topic': money_topic,\n        'is_crypto': bool(is_crypto and money_topic)\n    }\n",
+      "tests": [
+        {
+          "args": {
+            "question": "How did Bitcoin move today?",
+            "task": "crypto_movement",
+            "crypto_name": "",
+            "crypto_id": "",
+            "quote_currency": "",
+            "region": "",
+            "time_window": "",
+            "is_money_topic": true
+          },
+          "expect": {
+            "crypto_name": "Bitcoin",
+            "crypto_id": "bitcoin",
+            "quote_currency": "usd",
+            "time_window": "today",
+            "is_crypto": true
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "question": "Book a flight to Paris",
+            "task": "other",
+            "crypto_name": "",
+            "crypto_id": "",
+            "quote_currency": "",
+            "region": "",
+            "time_window": "",
+            "is_money_topic": false
+          },
+          "expect": {
+            "task": "other",
+            "is_money_topic": false,
+            "is_crypto": false
+          },
+          "contains": {}
+        }
+      ]
+    },
+    {
+      "name": "verify_money_data",
+      "description": "Verify that the fetched money data is present and usable.",
+      "code": "def run(task, is_money_topic, crypto_name, crypto_id, price_json, price_status, news_results):\n    problems = []\n    ok = True\n    if not is_money_topic:\n        return {'ok': False, 'problems': ['request is not about money']}\n    if task == 'other':\n        return {'ok': False, 'problems': ['unsupported money task']}\n    if not crypto_id:\n        problems.append('missing crypto id')\n    if price_status != 200 or not isinstance(price_json, dict) or not price_json:\n        problems.append('price data unavailable')\n    else:\n        row = price_json.get(crypto_id)\n        if not isinstance(row, dict) or 'usd' not in row or 'usd_24h_change' not in row:\n            problems.append('missing price or change fields')\n    if problems:\n        ok = False\n    return {'ok': ok, 'problems': problems}\n",
+      "tests": [
+        {
+          "args": {
+            "task": "crypto_movement",
+            "is_money_topic": true,
+            "crypto_name": "Bitcoin",
+            "crypto_id": "bitcoin",
+            "price_json": {
+              "bitcoin": {
+                "usd": 1,
+                "usd_24h_change": 2
+              }
+            },
+            "price_status": 200,
+            "news_results": []
+          },
+          "expect": {
+            "ok": true
+          },
+          "contains": {}
+        },
+        {
+          "args": {
+            "task": "crypto_movement",
+            "is_money_topic": true,
+            "crypto_name": "Bitcoin",
+            "crypto_id": "bitcoin",
+            "price_json": {},
+            "price_status": 500,
+            "news_results": []
+          },
+          "expect": {
+            "ok": false
+          },
+          "contains": {
+            "problems": [
+              "price data unavailable"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "judge_money_answer",
+      "description": "Score a cryptocurrency price move against fixed unusualness rules.",
+      "code": "def run(task, is_money_topic, crypto_name, crypto_id, price_json, price_status, news_results, verify_ok, verify_problems):\n    if not verify_ok:\n        return {'score': 0, 'verdict': 'insufficient-data', 'reasons': verify_problems or ['missing data'], 'answer_text': ''}\n    row = (price_json or {}).get(crypto_id, {}) if isinstance(price_json, dict) else {}\n    change = row.get('usd_24h_change')\n    price = row.get('usd')\n    score = 0\n    reasons = []\n    verdict = 'normal'\n    if isinstance(change, (int, float)):\n        abs_change = abs(change)\n        if abs_change >= 15:\n            score = 3\n            verdict = 'very unusual'\n            reasons.append('24h move is 15% or more')\n        elif abs_change >= 8:\n            score = 2\n            verdict = 'unusual'\n            reasons.append('24h move is at least 8%')\n        elif abs_change >= 3:\n            score = 1\n            verdict = 'moderate'\n            reasons.append('24h move is between 3% and 8%')\n        else:\n            reasons.append('24h move is small')\n    else:\n        verdict = 'insufficient-data'\n        reasons.append('missing percentage change')\n    if isinstance(news_results, list) and len(news_results) > 0:\n        reasons.append('recent news exists')\n    answer_text = ''\n    if isinstance(price, (int, float)) and isinstance(change, (int, float)):\n        sign = 'up' if change >= 0 else 'down'\n        answer_text = f'{crypto_name or crypto_id} is at ${price:,.2f} and is {sign} {abs(change):.2f}% over 24h.'\n    return {'score': score, 'verdict': verdict, 'reasons': reasons, 'answer_text': answer_text}\n",
+      "tests": [
+        {
+          "args": {
+            "task": "crypto_movement",
+            "is_money_topic": true,
+            "crypto_name": "Bitcoin",
+            "crypto_id": "bitcoin",
+            "price_json": {
+              "bitcoin": {
+                "usd": 100,
+                "usd_24h_change": 12
+              }
+            },
+            "price_status": 200,
+            "news_results": [],
+            "verify_ok": true,
+            "verify_problems": []
+          },
+          "expect": {
+            "score": 2,
+            "verdict": "unusual"
+          },
+          "contains": {
+            "answer_text": [
+              "Bitcoin",
+              "12.00%"
+            ]
+          }
+        },
+        {
+          "args": {
+            "task": "crypto_movement",
+            "is_money_topic": true,
+            "crypto_name": "Bitcoin",
+            "crypto_id": "bitcoin",
+            "price_json": {},
+            "price_status": 500,
+            "news_results": [],
+            "verify_ok": false,
+            "verify_problems": [
+              "price data unavailable"
+            ]
+          },
+          "expect": {
+            "score": 0,
+            "verdict": "insufficient-data"
+          },
+          "contains": {}
+        }
+      ]
+    },
+    {
+      "name": "compose_money_report",
+      "description": "Compose a short spoken verdict and markdown report for money questions.",
+      "code": "def run(question, task, crypto_name, crypto_id, price_json, price_status, news_results, verify_ok, verify_problems, judge_score, judge_verdict, judge_reasons, answer_text):\n    name = crypto_name or crypto_id or 'that asset'\n    if not verify_ok:\n        speech = f'I could not answer confidently because I could not fetch the needed money data for {name}.'\n        if verify_problems:\n            speech += ' ' + '; '.join(verify_problems[:2]) + '.'\n        report = '# Money answer\\n\\n## Result\\n\\nI could not produce a confident verdict.\\n\\n## Problems\\n'\n        for p in (verify_problems or ['unknown problem']):\n            report += f'- {p}\\n'\n        return {'speech': speech[:900], 'report': report}\n    row = (price_json or {}).get(crypto_id, {}) if isinstance(price_json, dict) else {}\n    price = row.get('usd')\n    change = row.get('usd_24h_change')\n    move = 'up' if isinstance(change, (int, float)) and change >= 0 else 'down'\n    pct = f'{abs(change):.2f}%' if isinstance(change, (int, float)) else 'unknown'\n    verdict_line = f'{name} moved {move} {pct} today, and that looks {judge_verdict}.'\n    if isinstance(judge_verdict, str) and judge_verdict == 'normal':\n        verdict_line = f'{name} moved {move} {pct} today, and it does not look unusual.'\n    if answer_text:\n        speech = f'{verdict_line} {answer_text}'\n    else:\n        speech = verdict_line\n    report = f'# Money answer\\n\\n## Question\\n\\n{question}\\n\\n## Verdict\\n\\n- Asset: {name}\\n- Price: {price if price is not None else \"unknown\"}\\n- 24h change: {pct}\\n- Judgment: {judge_verdict}\\n\\n## Reasons\\n'\n    for r in (judge_reasons or []):\n        report += f'- {r}\\n'\n    if isinstance(news_results, list) and news_results:\n        report += '\\n## Recent context\\n'\n        for item in news_results[:5]:\n            title = item.get('title', '') if isinstance(item, dict) else ''\n            url = item.get('url', '') if isinstance(item, dict) else ''\n            if title:\n                report += f'- [{title}]({url})\\n' if url else f'- {title}\\n'\n    return {'speech': speech[:900], 'report': report}\n",
+      "tests": [
+        {
+          "args": {
+            "question": "How did Bitcoin move today?",
+            "task": "crypto_movement",
+            "crypto_name": "Bitcoin",
+            "crypto_id": "bitcoin",
+            "price_json": {
+              "bitcoin": {
+                "usd": 100,
+                "usd_24h_change": 12
+              }
+            },
+            "price_status": 200,
+            "news_results": [],
+            "verify_ok": true,
+            "verify_problems": [],
+            "judge_score": 2,
+            "judge_verdict": "unusual",
+            "judge_reasons": [
+              "24h move is at least 8%"
+            ],
+            "answer_text": "Bitcoin is at $100.00 and is up 12.00% over 24h."
+          },
+          "expect": {
+            "speech": "Bitcoin moved up 12.00% today, and that looks unusual. Bitcoin is at $100.00 and is up 12.00% over 24h."
+          },
+          "contains": {
+            "report": [
+              "# Money answer",
+              "24h change"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "examples": [
+    {
+      "question": "How did Bitcoin move today, and is it unusual?"
+    },
+    {
+      "question": "What is the price of Ethereum right now?"
+    }
+  ],
+  "estimate": {
+    "min": {
+      "llm_tokens": 1319,
+      "credits": 0.0,
+      "seconds": 6.8,
+      "images": 0,
+      "tts_chars": 100,
+      "usd": 0.010291
+    },
+    "max": {
+      "llm_tokens": 1319,
+      "credits": 0.0,
+      "seconds": 8.8,
+      "images": 0,
+      "tts_chars": 900,
+      "usd": 0.098291
+    }
+  },
+  "safety": {
+    "verdict": "allow",
+    "notes": "This is a general money-focused assistant for price movement and market analysis, which is allowed and not primarily intended for fraud, evasion, or other harmful conduct."
+  },
+  "voice": {
+    "elevenlabs_agent_id": "agent_0101m4f88sg7e9g9s3ypm36sg459",
+    "first_message": "What money question can I answer for you?",
+    "archetype": "gremlin",
+    "language": "en",
+    "cast": [],
+    "voice_id": "2alZolkAxYfd0BjrwL0u",
+    "sounds": {
+      "arrive": "/artifacts/monsters/money-assistant/v1/arrive.mp3",
+      "working": "/artifacts/monsters/money-assistant/v1/working.mp3",
+      "done": "/artifacts/monsters/money-assistant/v1/done.mp3"
+    },
+    "birth_url": "/artifacts/monsters/money-assistant/v1/birth.mp3"
+  }
+}

@@ -1,0 +1,9 @@
+.env
+**/.env
+.git
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+monster-lab/dist
+frankenstein/data
+**/*.db
