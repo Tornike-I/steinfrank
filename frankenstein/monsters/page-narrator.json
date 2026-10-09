@@ -175,7 +175,6 @@
     "notes": "hand-written monster"
   },
   "voice": {
-    "elevenlabs_agent_id": "agent_4601m4es4rsdf9na1c83daapmeqq",
     "first_message": "Grrr... Dej mi adresu webové stránky a já ti ji přečtu.",
     "archetype": "golem",
     "language": "cs",
@@ -185,13 +184,6 @@
         "archetype": "gremlin",
         "role": "a tiny pebble gremlin living on the golem's shoulder who now and then adds one squeaky comment"
       }
-    ],
-    "voice_id": "elfiDKtwo000IOWXoY4K",
-    "sounds": {
-      "arrive": "/artifacts/monsters/page-narrator/v1/arrive.mp3",
-      "working": "/artifacts/monsters/page-narrator/v1/working.mp3",
-      "done": "/artifacts/monsters/page-narrator/v1/done.mp3"
-    },
-    "birth_url": "/artifacts/monsters/page-narrator/v1/birth.mp3"
+    ]
   }
 }

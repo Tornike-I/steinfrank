@@ -5,6 +5,7 @@ const defaults = () => ({
   conversations: [],
   currentId: null,
   monsters: [], // topic assistants: see monsters/registry.js
+  deletedMonsters: [],
   labCreatures: [], // wandering counterparts in the laboratory
   mode: 'lab', // 'lab' | 'monsters' | 'library'
   libraryView: 'roam', // 'roam' | 'cards'
@@ -18,10 +19,13 @@ function load() {
     if (!raw) return defaults();
     const data = JSON.parse(raw);
     const d = defaults();
+    const deleted = new Set(Array.isArray(data.deletedMonsters) ? data.deletedMonsters : []);
     return {
       conversations: Array.isArray(data.conversations) ? data.conversations : [],
       currentId: data.currentId ?? null,
-      monsters: Array.isArray(data.monsters) ? data.monsters : [],
+      monsters: (Array.isArray(data.monsters) ? data.monsters : []).filter((m) => !deleted.has(m.id)),
+      // Tabs merge by adding, so deletions are remembered by id or another tab would bring them back.
+      deletedMonsters: [...deleted],
       labCreatures: Array.isArray(data.labCreatures) ? data.labCreatures : [],
       mode: ['monsters', 'library'].includes(data.mode) ? data.mode : 'lab',
       libraryView: data.libraryView === 'cards' ? 'cards' : 'roam',
@@ -72,7 +76,13 @@ window.addEventListener('storage', (ev) => {
   let other;
   try { other = JSON.parse(ev.newValue); } catch { return; }
   let changed = false;
+  for (const id of other.deletedMonsters || []) {
+    if (!state.deletedMonsters.includes(id)) state.deletedMonsters.push(id);
+  }
+  const gone = new Set(state.deletedMonsters);
+  if (state.monsters.some((m) => gone.has(m.id))) { state.monsters = state.monsters.filter((m) => !gone.has(m.id)); changed = true; }
   for (const m of other.monsters || []) {
+    if (gone.has(m.id)) continue;
     const mine = state.monsters.find((x) => x.id === m.id);
     if (!mine) { state.monsters.push(m); changed = true; }
     else if ((m.chat?.length || 0) > (mine.chat?.length || 0) && !mine._live) { Object.assign(mine, m); changed = true; }

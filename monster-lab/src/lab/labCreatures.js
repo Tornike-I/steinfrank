@@ -120,6 +120,10 @@ export class LabCreatures {
   // cleanup stay gone from the floor (their chats live on in the tabs); only
   // a newly built monster walks in, and a summon brings a temporary stand-in.
   sync(defs) {
+    const ids = new Set(defs.map((d) => d.id));
+    for (const c of [...this.creatures.values()]) {
+      if (c.defId && !c.temporary && !ids.has(c.defId)) { this.scene.remove(c.group); disposeMonster(c.m); this.creatures.delete(c.id); }
+    }
     for (const def of defs) {
       const title = titleOf(def);
       const c = [...this.creatures.values()].find((x) => x.defId === def.id && x.state === 'alive' && !x.temporary);
