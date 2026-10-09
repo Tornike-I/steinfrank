@@ -24,6 +24,7 @@ def lab(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "lab.db")
     monkeypatch.setattr(config, "ALLOW_NETWORK_CAPABILITIES", True)
     monkeypatch.setattr(config, "USE_TEMPLATES", True)
+    monkeypatch.setattr(config, "LAB_FAST_RESPONSES", True)
     meteo = OpenMeteoFake()
     monkeypatch.setenv("FRANK_WEATHER_GEO_URL", f"http://127.0.0.1:{meteo.port}/geo")
     monkeypatch.setenv("FRANK_WEATHER_FORECAST_URL", f"http://127.0.0.1:{meteo.port}/forecast")
