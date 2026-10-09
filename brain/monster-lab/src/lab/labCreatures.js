@@ -1,0 +1,698 @@
+// Wandering counterparts as real 3D actors on the laboratory floor, sharing
+// the scientist's world (same floor, lights, camera). They are separate from
+// the assistants they represent: cleanup kills these, never the assistants.
+//
+// World units are metres; the floor is y = 0.
+import * as THREE from 'three';
+import { setPallor, setDeadEyes, disposeMonster } from '../monsters/monsterGen.js';
+import { buildFor, titleOf } from '../monsters/registry.js';
+import { animateMonster, hopHeight } from '../monsters/monsterAnim.js';
+import { blood as bloodMat } from '../three/materials.js';
+
+// Solids monsters walk around: the operating table (with a margin for its
+// legs), the Tesla machine, the bin and the bomb crate.
+const BLOCK_RECTS = [{ x0: 0.35, x1: 2.65, z0: -0.5, z1: 0.65 }];
+const BLOCK_CIRCLES = [{ x: 2.45, z: -0.85, r: 0.45 }, { x: 0.15, z: -1.0, r: 0.4 }, { x: -1.0, z: -0.95, r: 0.4 }];
+const blocked = (x, z, pad = 0) => BLOCK_RECTS.some((r) => x > r.x0 - pad && x < r.x1 + pad && z > r.z0 - pad && z < r.z1 + pad)
+  || BLOCK_CIRCLES.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + pad);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const ACID = new THREE.Color(0x7aff3a);
+
+// Free floor where monsters may roam (clear of the table, bins and machines).
+const ZONES = [
+  { x0: -2.6, x1: 3.5, z0: 0.8, z1: 2.1, w: 4 }, // in front of the slab
+  { x0: -2.6, x1: -0.7, z0: -0.5, z1: 0.8, w: 1.4 }, // left of the scientist
+  { x0: 2.75, x1: 3.5, z0: -0.25, z1: 0.8, w: 0.5 }, // right corner
+];
+
+// Floor stains stack in a fixed order, so they never flicker against each
+// other: scorch marks at the bottom, blood above, acid on top.
+const STAIN = { scorch: 0, blood: 1, acid: 2 };
+
+// Soft-edged round stain (alpha falls off toward the rim, with a ragged edge).
+const stainAlpha = (() => {
+  const n = 128, cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+  grad.addColorStop(0, '#fff');
+  grad.addColorStop(0.62, '#eee');
+  grad.addColorStop(0.85, '#555');
+  grad.addColorStop(1, '#000');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, n, n);
+  g.fillStyle = '#000';
+  for (let i = 0; i < 26; i++) {
+    const a = (i / 26) * Math.PI * 2, r = n * (0.44 + Math.random() * 0.06);
+    g.beginPath();
+    g.arc(n / 2 + Math.cos(a) * r, n / 2 + Math.sin(a) * r, n * (0.04 + Math.random() * 0.05), 0, Math.PI * 2);
+    g.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+})();
+
+const blobGeo = (() => {
+  const g = new THREE.CircleGeometry(1, 18);
+  g.rotateX(-Math.PI / 2);
+  return g;
+})();
+
+export class LabCreatures {
+  constructor({ scene, fx, camera, scientist }) {
+    this.scene = scene;
+    this.fx = fx;
+    this.camera = camera;
+    this.scientist = scientist; // a moving obstacle too
+    this.creatures = new Map();
+    this.decals = [];
+    this.sprites = [];
+    this.t = 0;
+    this._acc = 1;
+    this.blobMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false });
+    this.ray = new THREE.Raycaster();
+  }
+
+  count() {
+    let n = 0;
+    for (const c of this.creatures.values()) if (c.state !== 'dissolving' && !c.temporary) n++;
+    return n;
+  }
+
+  // ----------------------------------------------------------- creation
+  _make(rec, monster = null) {
+    const m = monster || buildFor(rec.seed, rec.theme, rec.limbs, rec.form);
+    m.root.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
+    const group = new THREE.Group();
+    const tilt = new THREE.Group();
+    group.add(tilt);
+    tilt.add(m.root);
+    m.root.position.set(0, 0, 0);
+    m.root.quaternion.identity();
+    const blob = new THREE.Mesh(blobGeo, this.blobMat);
+    blob.scale.set(m.width * 0.5, 1, m.width * 0.4);
+    blob.position.y = 0.006;
+    group.add(blob);
+    const label = rec.name ? makeLabel(rec.name) : null;
+    if (label) group.add(label);
+    this.scene.add(group);
+    const c = {
+      id: rec.id, seed: rec.seed, defId: rec.defId || null, theme: rec.theme || null, name: rec.name || null, limbs: rec.limbs || [], form: rec.form || 1,
+      m, group, tilt, blob, label,
+      pos: V(), yaw: 0, yawT: 0, state: 'alive', mode: 'idle', timer: 1 + Math.random() * 2, target: null,
+      phase: Math.random() * 6, walk: 0, excite: 0, t: Math.random() * 10, flies: [], side: 1,
+    };
+    this.creatures.set(c.id, c);
+    return c;
+  }
+
+  restore(list) {
+    for (const s of list) {
+      if (s.z === undefined) continue; // records from the old 2D layer
+      const c = this._make(s);
+      c.pos.set(s.x, 0, s.z);
+      c.yaw = c.yawT = s.yaw || 0;
+      if (s.state === 'dead') this._makeCorpse(c, s.side ?? 1, true);
+      this._place(c);
+    }
+  }
+
+  // Keep name tags in step with each monster's title. Monsters killed in a
+  // cleanup stay gone from the floor (their chats live on in the tabs); only
+  // a newly built monster walks in, and a summon brings a temporary stand-in.
+  sync(defs) {
+    const ids = new Set(defs.map((d) => d.id));
+    for (const c of [...this.creatures.values()]) {
+      if (c.defId && !c.temporary && !ids.has(c.defId)) { this.scene.remove(c.group); disposeMonster(c.m); this.creatures.delete(c.id); }
+    }
+    for (const def of defs) {
+      const title = titleOf(def);
+      const c = [...this.creatures.values()].find((x) => x.defId === def.id && x.state === 'alive' && !x.temporary);
+      if (c && c.name !== title) {
+        if (c.label) c.group.remove(c.label);
+        c.name = title;
+        c.label = makeLabel(title);
+        c.group.add(c.label);
+      }
+    }
+  }
+
+  serialize() {
+    const out = [];
+    for (const c of this.creatures.values()) {
+      if (c.state === 'dissolving' || c.temporary) continue;
+      const dead = c.state === 'dead' || c.state === 'flung';
+      const p = c.state === 'arriving' ? c.arrive.to : c.state === 'summoned' || c.state === 'returning' ? c.sum.home : c.pos;
+      out.push({ id: c.id, seed: c.seed, defId: c.defId, theme: c.theme, name: c.name, limbs: c.limbs, form: c.form, state: dead ? 'dead' : 'alive', x: +p.x.toFixed(3), z: +p.z.toFixed(3), yaw: +c.yaw.toFixed(2), side: c.side });
+    }
+    return out;
+  }
+
+  // The freshly made monster leaps off the slab onto the floor. Takes over the
+  // patient's own monster (wounds and all). Resolves when it has landed.
+  adopt(rec, patient) {
+    const holder = patient.holder;
+    holder.updateMatrixWorld(true);
+    const from = holder.getWorldPosition(V());
+    const m = patient.release();
+    const c = this._make(rec, m);
+    c.pos.copy(from);
+    c.yaw = 0;
+    const to = this._freeSpot(V(from.x + (Math.random() - 0.5) * 1.2, 0, 1.15 + Math.random() * 0.5), 0.7);
+    return new Promise((resolve) => {
+      c.state = 'arriving';
+      c.arrive = { t: 0, from, to, dur: 0.9, resolve };
+      this._place(c);
+    });
+  }
+
+  _radius(c) { return Math.max(0.12, c.m.width * 0.4); }
+
+  // A wander target the monster can walk to in a straight line without
+  // crossing a solid (the steering handles the small stuff).
+  _reachableTarget(c) {
+    for (let i = 0; i < 14; i++) {
+      const t = this._freeSpot(this._randomPoint(), 0.45);
+      let clear = true;
+      for (let k = 1; k <= 12 && clear; k++) {
+        const p = c.pos.clone().lerp(t, k / 12);
+        if (blocked(p.x, p.z, this._radius(c))) clear = false;
+      }
+      if (clear) return t;
+    }
+    return c.pos.clone();
+  }
+
+  // Would this position overlap another monster more than it did before?
+  _crowded(c, before) {
+    const r = this._radius(c);
+    for (const o of this.creatures.values()) {
+      if (o === c || o.state === 'dissolving' || o.state === 'flung') continue;
+      const min = (r + this._radius(o)) * 0.95;
+      const now = Math.hypot(c.pos.x - o.pos.x, c.pos.z - o.pos.z);
+      if (now < min && now < Math.hypot(before.x - o.pos.x, before.z - o.pos.z)) return true;
+    }
+    return false;
+  }
+
+  // Push away from nearby monsters and the scientist.
+  _separation(c) {
+    const push = V();
+    const r = this._radius(c);
+    for (const o of this.creatures.values()) {
+      if (o === c || o.state === 'dissolving' || o.state === 'flung') continue;
+      const dx = c.pos.x - o.pos.x, dz = c.pos.z - o.pos.z;
+      const d = Math.hypot(dx, dz), min = r + this._radius(o) + 0.08;
+      if (d > 1e-4 && d < min) push.add(V(dx / d, 0, dz / d).multiplyScalar((min - d) / min * 2));
+    }
+    const s = this.scientist?.root.position;
+    if (s) {
+      const dx = c.pos.x - s.x, dz = c.pos.z - s.z, d = Math.hypot(dx, dz), min = r + 0.45;
+      if (d > 1e-4 && d < min) push.add(V(dx / d, 0, dz / d).multiplyScalar((min - d) / min * 3));
+    }
+    return push;
+  }
+
+  // Desired direction plus separation, deflected along solids ahead.
+  _steer(c, desired) {
+    const dir = desired.clone().add(this._separation(c).multiplyScalar(2.2));
+    const r = this._radius(c);
+    const ahead = c.pos.clone().addScaledVector(dir.clone().normalize(), r + 0.15);
+    if (blocked(ahead.x, ahead.z, r)) {
+      // Slide along the obstacle: try turning left or right, whichever is free.
+      for (const a of [0.6, -0.6, 1.2, -1.2, 1.8, -1.8]) {
+        const d2 = dir.clone().applyAxisAngle(V(0, 1, 0), a).normalize();
+        const p2 = c.pos.clone().addScaledVector(d2, r + 0.15);
+        if (!blocked(p2.x, p2.z, r)) return d2;
+      }
+      return V();
+    }
+    return dir.lengthSq() > 1e-6 ? dir.normalize() : dir;
+  }
+
+  _randomPoint() {
+    const total = ZONES.reduce((s, z) => s + z.w, 0);
+    let r = Math.random() * total;
+    const z = ZONES.find((zz) => (r -= zz.w) <= 0) || ZONES[0];
+    return V(z.x0 + Math.random() * (z.x1 - z.x0), 0, z.z0 + Math.random() * (z.z1 - z.z0));
+  }
+
+  _freeSpot(pref, minDist = 0.55) {
+    let best = pref, tries = 0;
+    const ok = (p) => [...this.creatures.values()].every((c) => c.state === 'dissolving' || c.pos.distanceTo(p) > minDist);
+    while (!ok(best) && tries++ < 20) best = tries < 6 ? pref.clone().add(V((Math.random() - 0.5) * 1.2, 0, (Math.random() - 0.5) * 0.8)) : this._randomPoint();
+    const zf = ZONES[0];
+    best.x = THREE.MathUtils.clamp(best.x, zf.x0, zf.x1);
+    best.z = THREE.MathUtils.clamp(best.z, -0.5, zf.z1);
+    return best;
+  }
+
+  // ------------------------------------------------------------ summon
+  // An existing assistant answers a lab question: its counterpart turns to
+  // the viewer, charges at the camera and screams. If it was destroyed, a
+  // temporary stand-in walks in from the side for the transition.
+  summon(rec, { onStart, onScream, target: at, hold = 1.3, lunge = null } = {}) {
+    return new Promise((resolve) => {
+      let c = [...this.creatures.values()].find((x) => x.defId === rec.defId && x.state === 'alive');
+      let temporary = false;
+      if (!c) {
+        c = this._make({ ...rec, id: `tmp-${rec.defId}-${Date.now()}` });
+        // In view, on the floor in front of the slab, so its charge is seen.
+        c.pos.copy(this._freeSpot(V(0.6 + (Math.random() < 0.5 ? -1 : 1) * (0.9 + Math.random() * 0.6), 0, 1.25), 0.5));
+        c.temporary = temporary = true;
+      }
+      let target = at?.clone();
+      if (!target) {
+        const fwd = V(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0).normalize();
+        target = this.camera.position.clone().addScaledVector(fwd, 1.3 + c.m.height * 0.6).setY(0);
+      }
+      c.state = 'summoned';
+      c.sum = { t: 0, from: c.pos.clone(), home: c.pos.clone(), target, onScream, resolve, temporary, screamed: false, hold, lunge };
+      this._place(c);
+      onStart?.(c);
+    });
+  }
+
+  // ------------------------------------------------------------ deaths
+  _makeCorpse(c, side, instant = false) {
+    c.state = 'dead';
+    c.side = side;
+    setPallor(c.m, 0.55);
+    setDeadEyes(c.m, true);
+    c.tilt.rotation.set(0, 0, side * Math.PI / 2 * 0.94);
+    c.tilt.position.y = c.m.width * 0.42;
+    for (const f of c.flies) c.group.remove(f.mesh);
+    c.flies = [];
+    c.pool = this._decal(c.pos.clone(), c.m.height * 0.45, 0x5a0507, instant ? 1 : 0.1, 'blood');
+    for (let i = 0; i < 2; i++) {
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.008, 5, 4), new THREE.MeshBasicMaterial({ color: 0x0a0a0a }));
+      c.group.add(f);
+      c.flies.push({ mesh: f, a: Math.random() * 6, r: 0.18 + Math.random() * 0.1 });
+    }
+    if (c.label) c.label.visible = false;
+  }
+
+  _remove(c) {
+    this.scene.remove(c.group);
+    if (c.label) { c.label.material.map.dispose(); c.label.material.dispose(); }
+    for (const b of c.goo || []) { b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
+    disposeMonster(c.m);
+    this.creatures.delete(c.id);
+  }
+
+  clear() {
+    for (const c of [...this.creatures.values()]) this._remove(c);
+    for (const d of this.decals) this.scene.remove(d.mesh);
+    for (const s of this.sprites) this.scene.remove(s.sprite);
+    this.decals = []; this.sprites = [];
+  }
+
+  // Bomb lands at `at`: chain-reaction blasts kill every counterpart.
+  explodeAt(at) {
+    const list = [...this.creatures.values()].filter((c) => c.state !== 'dissolving').sort((a, b) => a.pos.distanceTo(at) - b.pos.distanceTo(at));
+    this.fx.fire(at.clone().setY(0.3), 70);
+    this.fx.smoke(at.clone().setY(0.4), 18, 0x3a3630);
+    this._decal(at.clone(), 0.55, 0x2e2620, 1, 'scorch'); // a soft sooty mark, not a black hole
+    this._comic(at.clone().setY(1.3), 'KA-BLAM!', 1.1);
+    list.forEach((c, i) => setTimeout(() => {
+      if (!this.creatures.has(c.id)) return;
+      const p = c.pos.clone().setY(0.4);
+      this.fx.fire(p, 26);
+      this.fx.blood(p, V(0, 1, 0), 26, 2.4, 3);
+      this._fling(c, at);
+    }, 120 + i * 90));
+    if (list.length > 3) setTimeout(() => this._comic(list[list.length - 1].pos.clone().setY(1.2), 'SPLORCH!', 0.8), 400);
+    return wait(1300 + list.length * 90);
+  }
+
+  _fling(c, from) {
+    const away = c.pos.clone().sub(from).setY(0);
+    if (away.lengthSq() < 0.01) away.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+    away.normalize().multiplyScalar(1.2 + Math.random() * 1.5);
+    c.state = 'flung';
+    c.fling = { v: V(away.x, 3.2 + Math.random() * 1.5, away.z), spin: V((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 12) };
+    if (c.pool) { c.pool.fade = true; c.pool = null; }
+    c.tilt.position.y = 0;
+    setPallor(c.m, 0.22, new THREE.Color(0x4a4038)); // singed, still recognisable
+    setDeadEyes(c.m, true);
+    if (c.label) c.label.visible = false;
+  }
+
+  // Acid: green rain, then every corpse melts into a puddle.
+  dissolveAll() {
+    for (let i = 0; i < 6; i++) this.fx.goo(V(-1.5 + i * 0.9, 2.8, 1.2 + (i % 2) * 0.4), 14, 0.6);
+    const list = [...this.creatures.values()];
+    list.forEach((c, i) => setTimeout(() => {
+      if (!this.creatures.has(c.id)) return;
+      if (c.state === 'flung') { c.pos.y = 0; this._makeCorpse(c, c.side || 1, true); }
+      c.state = 'dissolving';
+      c.dis = { t: 0 };
+      this._acidOnBody(c);
+      this._decal(c.pos.clone(), c.m.height * 0.6, 0x6acc2a, 0.15, 'acid');
+    }, 400 + i * 110));
+    return wait(400 + list.length * 110 + 1900);
+  }
+
+  // Acid lands on the corpse itself: glossy goo blobs placed on the body's
+  // actual upper surface (raycast from above), melting along with it.
+  _acidOnBody(c) {
+    c.group.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(c.tilt);
+    const ray = new THREE.Raycaster();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x8aff3a, emissive: 0x3aa010, emissiveIntensity: 0.6, roughness: 0.08, transparent: true, opacity: 0.85 });
+    c.goo = [];
+    for (let i = 0; i < 16 && c.goo.length < 9; i++) {
+      const x = box.min.x + Math.random() * (box.max.x - box.min.x);
+      const z = box.min.z + Math.random() * (box.max.z - box.min.z);
+      ray.set(V(x, box.max.y + 0.5, z), V(0, -1, 0));
+      const hit = ray.intersectObject(c.m.root, true)[0];
+      if (!hit) continue;
+      const r = 0.035 + Math.random() * 0.05;
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), mat);
+      blob.position.copy(c.group.worldToLocal(hit.point.clone()));
+      blob.scale.setScalar(0.001);
+      c.group.add(blob);
+      c.goo.push({ mesh: blob, r, ph: Math.random() * 6 });
+    }
+    // A few drips running down off the body.
+    for (let i = 0; i < 4; i++) this.fx.goo(V(c.pos.x + (Math.random() - 0.5) * 0.3, box.max.y, c.pos.z + (Math.random() - 0.5) * 0.3), 4, 0.4);
+  }
+
+  // The hose jet lands at `p`: stains (and anything left over) within r wash away.
+  washAt(p, r = 0.5) {
+    for (const d of this.decals) if (!d.fade && Math.hypot(d.pos.x - p.x, d.pos.z - p.z) < r + d.r * 0.5) d.fade = true;
+    for (const s of this.sprites) s.fade = true;
+    for (const c of [...this.creatures.values()]) {
+      if ((c.state === 'dead' || c.state === 'dissolving') && Math.hypot(c.pos.x - p.x, c.pos.z - p.z) < r) this._remove(c);
+    }
+  }
+
+  // ------------------------------------------------------------ picking
+  // Living monster under a client-space point, given the stage rect.
+  pick(clientX, clientY, rect) {
+    const ndc = new THREE.Vector2(((clientX - rect.x) / rect.w) * 2 - 1, -((clientY - rect.y) / rect.h) * 2 + 1);
+    this.ray.setFromCamera(ndc, this.camera);
+    let best = null, bestD = Infinity;
+    for (const c of this.creatures.values()) {
+      if (c.state !== 'alive' || !c.defId) continue;
+      const h = c.m.height;
+      const center = c.pos.clone().add(V(0, h * 0.5, 0));
+      const r = Math.max(h, c.m.width) * 0.55;
+      const labelPos = c.pos.clone().add(V(0, h + 0.16, 0));
+      const hit = this.ray.ray.distanceToPoint(center) < r || this.ray.ray.distanceToPoint(labelPos) < 0.14;
+      const d = this.camera.position.distanceTo(center);
+      if (hit && d < bestD) { best = c; bestD = d; }
+    }
+    return best;
+  }
+
+  // ------------------------------------------------------------- decals
+  _decal(pos, r, color, startScale = 1, kind = 'blood') {
+    const layer = STAIN[kind] ?? 1;
+    const acid = kind === 'acid';
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: acid ? 0.12 : 0.25, transparent: true, opacity: kind === 'scorch' ? 0.62 : acid ? 0.8 : 0.9,
+      alphaMap: stainAlpha, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 - layer * 2, polygonOffsetUnits: -2 - layer * 2,
+      emissive: acid ? 0x2a6a08 : 0x000000, emissiveIntensity: acid ? 0.5 : 0,
+    });
+    const m = new THREE.Mesh(blobGeo, mat);
+    m.renderOrder = 1 + layer; // fixed draw order: scorch, then blood, then acid
+    const d = { mesh: m, pos: pos.clone().setY(0.003 + layer * 0.0015), r, s: startScale, fade: false, sx: 0.8 + Math.random() * 0.4, kind };
+    m.position.copy(d.pos);
+    m.scale.set(r * d.s * d.sx, 1, r * d.s);
+    m.receiveShadow = true;
+    this.scene.add(m);
+    this.decals.push(d);
+    if (this.decals.length > 60) { const old = this.decals.shift(); this.scene.remove(old.mesh); old.mesh.material.dispose(); }
+    return d;
+  }
+
+  // `screen` ({ x, y, d }) keeps it at a fixed spot in front of the camera.
+  _comic(pos, text, size = 1, screen = null) {
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 320;
+    const g = cv.getContext('2d');
+    g.translate(256, 160);
+    g.beginPath();
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2, rr = i % 2 ? 110 : 160 + Math.random() * 40;
+      g.lineTo(Math.cos(a) * rr * 1.4, Math.sin(a) * rr * 0.85);
+    }
+    g.closePath();
+    g.fillStyle = '#ffd23a'; g.fill();
+    g.lineWidth = 10; g.strokeStyle = '#2a0a04'; g.stroke();
+    g.rotate(-0.12);
+    g.font = '900 78px "Lilita One", Impact, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 12; g.strokeStyle = '#2a0a04'; g.strokeText(text, 0, 6);
+    g.fillStyle = '#d8241a'; g.fillText(text, 0, 6);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    sprite.renderOrder = 20;
+    sprite.position.copy(pos);
+    this.scene.add(sprite);
+    this.sprites.push({ sprite, t: 0, life: 1.5, size, screen });
+  }
+
+  // --------------------------------------------------------------- frame
+  _place(c) {
+    const hop = c.state === 'alive' ? hopHeight(c.m, c.phase, c.walk) : 0;
+    c.group.position.set(c.pos.x, c.pos.y + hop, c.pos.z);
+    c.group.rotation.y = c.yaw;
+    c.blob.visible = c.state === 'alive' || c.state === 'arriving' || c.state === 'summoned' || c.state === 'returning';
+    c.blob.position.y = 0.006 - c.pos.y - hop;
+    if (c.label) {
+      c.label.visible = c.state === 'alive' || c.state === 'returning';
+      c.label.position.set(0, c.m.height + 0.16 - hop, 0);
+    }
+  }
+
+  update(dt) {
+    this.t += dt;
+    for (const d of this.decals) {
+      if (d.s < 1) d.s = Math.min(1, d.s + dt * 0.6);
+      if (d.fade) d.mesh.material.opacity -= dt * 2;
+      d.mesh.scale.set(d.r * d.s * d.sx, 1, d.r * d.s * (d.streak || 1));
+    }
+    this.decals = this.decals.filter((d) => {
+      if (d.mesh.material.opacity > 0) return true;
+      this.scene.remove(d.mesh); d.mesh.material.dispose();
+      return false;
+    });
+    this.sprites = this.sprites.filter((s) => {
+      s.t += dt;
+      const pop = Math.min(1, s.t / 0.15);
+      const sc = (0.5 + pop * 0.5) * s.size;
+      s.sprite.scale.set(1.6 * sc, 1.0 * sc, 1);
+      if (s.screen) {
+        const cam = this.camera;
+        s.sprite.position.set(s.screen.x * s.screen.d, s.screen.y * s.screen.d, -s.screen.d).applyMatrix4(cam.matrixWorld);
+      }
+      if (s.t > s.life || s.fade) s.sprite.material.opacity -= dt * 4;
+      if (s.sprite.material.opacity <= 0) { this.scene.remove(s.sprite); s.sprite.material.map.dispose(); return false; }
+      return true;
+    });
+    // Smooth physics for flung bodies.
+    for (const c of this.creatures.values()) {
+      if (c.state !== 'flung') continue;
+      const f = c.fling;
+      f.v.y -= 9.8 * dt;
+      c.pos.addScaledVector(f.v, dt);
+      c.tilt.rotation.x += f.spin.x * dt; c.tilt.rotation.z += f.spin.z * dt; c.yaw += f.spin.y * dt;
+      c.pos.x = THREE.MathUtils.clamp(c.pos.x, -3.0, 3.8);
+      c.pos.z = THREE.MathUtils.clamp(c.pos.z, -1.2, 2.6);
+      if (c.pos.y <= 0 && f.v.y < 0) {
+        c.pos.y = 0;
+        c.tilt.rotation.set(0, 0, 0);
+        this.fx.blood(c.pos.clone().setY(0.1), V(0, 1, 0), 10, 1.5, 1.5);
+        this._makeCorpse(c, Math.random() < 0.5 ? -1 : 1);
+      }
+      this._place(c);
+    }
+    // Puppets animate every frame for smooth motion.
+    const step = Math.min(dt, 0.1);
+    for (const c of [...this.creatures.values()]) this._tick(c, step);
+  }
+
+  _tick(c, dt) {
+    c.t += dt;
+    const m = c.m;
+    if (c.state === 'arriving') {
+      const a = c.arrive;
+      a.t += dt;
+      const u = Math.min(1, a.t / a.dur);
+      c.pos.lerpVectors(a.from, a.to, u);
+      c.pos.y = a.from.y * (1 - u) + Math.sin(u * Math.PI) * 0.6;
+      c.yaw = Math.atan2(a.to.x - a.from.x, a.to.z - a.from.z) * (1 - u);
+      animateMonster(m, c.t, { excite: 1 - u * 0.5 });
+      if (u >= 1) {
+        c.pos.y = 0;
+        c.state = 'alive'; c.mode = 'idle'; c.timer = 0.8;
+        a.resolve?.();
+      }
+      this._place(c);
+      return;
+    }
+    if (c.state === 'alive') {
+      if (c.mode === 'walk') {
+        const d = c.target.clone().sub(c.pos).setY(0);
+        const dist = d.length();
+        const speed = 0.32 * m.speed;
+        const moving = m.gait !== 'hop' || Math.sin(c.phase) > 0;
+        if (dist < 0.06 || c.stuck > 2.5) { c.mode = 'idle'; c.timer = 1 + Math.random() * 3.5; c.stuck = 0; }
+        else if (moving) {
+          const dir = this._steer(c, d.normalize());
+          const stepLen = Math.min(dist, speed * dt * (m.gait === 'hop' ? 2 : 1));
+          const before = c.pos.clone();
+          c.pos.addScaledVector(dir, stepLen);
+          // Never step into a solid or into another monster; if that keeps
+          // happening, give up on this target and pick another.
+          const refused = blocked(c.pos.x, c.pos.z, this._radius(c)) || this._crowded(c, before);
+          if (refused) c.pos.copy(before);
+          c.stuck = refused || dir.lengthSq() < 0.01 ? (c.stuck || 0) + dt : Math.max(0, (c.stuck || 0) - dt);
+          if (dir.lengthSq() > 0.01) c.yawT = Math.atan2(dir.x, dir.z);
+        }
+        c.walk = Math.min(1, c.walk + dt * 4);
+        c.phase += dt * (m.gait === 'scuttle' ? 13 : 8) * m.speed;
+      } else {
+        c.walk = Math.max(0, c.walk - dt * 4);
+        c.timer -= dt;
+        // Idle monsters still get nudged apart if someone bumps into them.
+        const push = this._separation(c);
+        if (push.lengthSq() > 1e-5) {
+          const next = c.pos.clone().addScaledVector(push, dt * 1.6);
+          if (!blocked(next.x, next.z, this._radius(c))) c.pos.copy(next);
+        }
+        if (c.timer < 0) {
+          c.target = this._reachableTarget(c);
+          c.mode = 'walk';
+          c.excite = Math.random() < 0.2 ? 1 : 0;
+        }
+        // Idle monsters mostly face the viewer, with the odd glance around.
+        if (Math.random() < 0.03) c.yawT = (Math.random() - 0.5) * 1.6;
+      }
+      c.excite = Math.max(0, c.excite - dt * 0.8);
+      let dy = c.yawT - c.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      c.yaw += dy * 0.35;
+      animateMonster(m, c.t, { walk: c.walk, phase: c.phase, excite: c.excite });
+      this._place(c);
+      return;
+    }
+    if (c.state === 'summoned' || c.state === 'returning') { this._tickSummon(c, dt); return; }
+    if (c.state === 'dead') {
+      for (const f of c.flies) {
+        f.a += dt * (3 + Math.random() * 2);
+        f.mesh.position.set(Math.cos(f.a) * f.r, 0.3 + Math.sin(f.a * 1.7) * 0.08, Math.sin(f.a) * f.r);
+      }
+      return;
+    }
+    if (c.state === 'dissolving') {
+      const k = c.dis;
+      k.t += dt;
+      const u = Math.min(1, k.t / 1.7);
+      setPallor(m, Math.min(1, u * 1.5), ACID);
+      // Melt down into the puddle: squash in world-vertical (the group isn't
+      // rotated onto its side like the tilt is), spreading a little.
+      const melt = u * u * (3 - 2 * u);
+      c.group.scale.set(1 + melt * 0.25, Math.max(0.04, 1 - melt), 1 + melt * 0.25);
+      for (const f of c.flies) f.mesh.visible = false;
+      for (const b of c.goo || []) {
+        const grow = Math.min(1, k.t / 0.25);
+        b.mesh.scale.setScalar(b.r * grow * (1 + Math.sin(k.t * 9 + b.ph) * 0.06));
+      }
+      if (Math.random() < 0.5) this.fx.goo(c.pos.clone().setY(0.12 * (1 - melt) + 0.03), 2, 0.25);
+      if (u >= 1) this._remove(c);
+    }
+  }
+
+  _tickSummon(c, dt) {
+    const k = c.sum, m = c.m;
+    k.t += dt;
+    if (c.state === 'returning') {
+      const u = Math.min(1, k.t / 1.2);
+      c.pos.lerpVectors(k.peak, k.home, u * u * (3 - 2 * u));
+      c.yaw = Math.atan2(k.home.x - k.peak.x, k.home.z - k.peak.z);
+      c.phase += dt * 10;
+      animateMonster(m, c.t, { walk: 1 - u, phase: c.phase });
+      if (u >= 1) { c.state = 'alive'; c.mode = 'idle'; c.timer = 1; c.yawT = 0; }
+      this._place(c);
+      return;
+    }
+    const charge = k.temporary ? 1.6 : 1.1;
+    const toCam = Math.atan2(this.camera.position.x - c.pos.x, this.camera.position.z - c.pos.z);
+    if (k.t < charge) {
+      const u = k.t / charge;
+      // Accelerate, then brake hard right in front of the lens.
+      const e = u < 0.75 ? (u / 0.75) ** 2 * 0.9 : 0.9 + 0.1 * (1 - (1 - (u - 0.75) / 0.25) ** 2);
+      c.pos.lerpVectors(k.from, k.target, e);
+      let dy = toCam - c.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      c.yaw += dy * 0.5;
+      c.phase += dt * 16;
+      animateMonster(m, c.t, { walk: 1, phase: c.phase, excite: 0.3, look: 0 });
+    } else {
+      if (!k.screamed) {
+        k.screamed = true;
+        k.onScream?.();
+        // Pinned to the screen, upper right of the face that fills the lens
+        // (a world position would balloon as the camera pushes in).
+        this._comic(c.pos.clone(), 'AAAARGH!', 0.15, { x: 0.12, y: 0.14, d: 0.9 });
+      }
+      c.yaw = toCam;
+      // Lean in toward the lens while screaming.
+      if (k.lunge) {
+        const u = Math.min(1, (k.t - charge) / k.hold);
+        c.pos.lerpVectors(k.target, k.lunge, 1 - (1 - u) ** 2);
+        this._place(c);
+      }
+      c.group.position.x = c.pos.x + (Math.random() - 0.5) * 0.02;
+      // Head and eyes straight at the lens.
+      animateMonster(m, c.t, { excite: 1, verb: 'cheer', verbW: 1, talk: 1, look: 0 });
+      for (const h of m.heads) { h.pivot.rotation.y = 0; h.head.rotation.x = -0.08 + Math.sin(c.t * 31) * 0.03; h.head.rotation.z = Math.sin(c.t * 23) * 0.05; }
+      if (k.t > charge + k.hold && k.resolve) {
+        const r = k.resolve;
+        k.resolve = null;
+        r();
+        if (k.temporary) { this._remove(c); return; }
+        c.state = 'returning';
+        k.t = 0;
+        k.peak = c.pos.clone();
+      }
+      return;
+    }
+    this._place(c);
+  }
+}
+
+// Name tag floating above a living monster.
+function makeLabel(text) {
+  const cv = document.createElement('canvas');
+  const g = cv.getContext('2d');
+  const font = '600 30px Inter, system-ui, sans-serif';
+  g.font = font;
+  const w = Math.ceil(g.measureText(text).width) + 34;
+  cv.width = w; cv.height = 50;
+  g.font = font;
+  g.fillStyle = 'rgba(16,14,12,0.82)';
+  g.beginPath();
+  g.roundRect(1, 1, w - 2, 48, 24);
+  g.fill();
+  g.strokeStyle = 'rgba(166,214,90,0.75)';
+  g.lineWidth = 2.5;
+  g.stroke();
+  g.fillStyle = '#efe6cf';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, w / 2, 26);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  s.renderOrder = 15;
+  const hgt = 0.1;
+  s.scale.set(hgt * (w / 50), hgt, 1);
+  return s;
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+export { bloodMat };

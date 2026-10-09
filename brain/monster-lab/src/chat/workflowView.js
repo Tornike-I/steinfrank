@@ -25,7 +25,7 @@ const BRAIN_STEP = {
   'forged:new_organ': { icon: '🪚', tool: 'Forged Python · new organ' },
   'forged:compose': { icon: '✒️', tool: 'Composer · no AI' },
 };
-const SCRIPTED_LIMB = { gather: 'web_search', read: 'http_fetch', think: 'llm', compute: 'forged', write: 'llm' };
+const SCRIPTED_LIMB ={ gather: 'web_search', read: 'http_fetch', think: 'llm', compute: 'forged', write: 'llm' };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const human = (id) => String(id).replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
