@@ -51,13 +51,24 @@ export function buildMonster(seed, spec = {}) {
   const bloodMat = blood();
   mats.push(toothMat);
 
+  // Newer monsters get far more varied body plans and sizes. These draws use
+  // their own stream so monsters saved before keep their exact look.
+  const vr = spec.variety ? new Rng((seed ^ 0x5bd1e995) >>> 0) : null;
+  const plan = vr ? vr.weighted(PLANS) : 'classic';
+  const sizeMul = vr ? vr.weighted(SIZES)(vr) : 1;
+  const extras = vr ? pickExtras(vr, plan) : [];
+
   const root = new THREE.Group();
   root.name = 'monster';
   const body = new THREE.Group();
   root.add(body);
 
   // --- torso ---------------------------------------------------------------
-  const bodyType = r.weighted(W('bodies', [['blob', 3], ['tall', 2], ['pear', 2], ['bean', 1.4], ['stack', 1.4]]));
+  let bodyType = r.weighted(W('bodies', [['blob', 3], ['tall', 2], ['pear', 2], ['bean', 1.4], ['stack', 1.4]]));
+  if (plan === 'jelly') bodyType = 'blob';
+  if (plan === 'spider') bodyType = 'bean';
+  if (plan === 'serpent') bodyType = 'tall';
+  if (plan === 'tower') bodyType = 'stack';
   let rad;
   switch (bodyType) {
     case 'blob': { const s = r.float(0.3, 0.42); rad = V(s, s * r.float(0.85, 1.05), s * r.float(0.8, 0.95)); break; }
@@ -66,8 +77,12 @@ export function buildMonster(seed, spec = {}) {
     case 'bean': rad = V(r.float(0.42, 0.52), r.float(0.22, 0.28), r.float(0.26, 0.32)); break;
     default: rad = V(r.float(0.28, 0.36), r.float(0.26, 0.32), r.float(0.25, 0.3));
   }
-  const legCount = r.weighted(W('legs', [[1, 0.6], [2, 5], [3, 1], [4, 2], [6, 0.8]]));
-  const legLen = r.float(0.1, legCount >= 4 ? 0.28 : 0.42);
+  let legCount = r.weighted(W('legs', [[1, 0.6], [2, 5], [3, 1], [4, 2], [6, 0.8]]));
+  let legLen = r.float(0.1, legCount >= 4 ? 0.28 : 0.42);
+  if (plan === 'jelly' || plan === 'serpent') legCount = 0;
+  if (plan === 'spider') { legCount = 8; legLen = vr.float(0.16, 0.24); }
+  if (plan === 'flyer') { legCount = vr.chance(0.6) ? 2 : legCount; legLen = vr.float(0.08, 0.16); }
+  if (plan === 'serpent') legLen = vr.float(0.12, 0.2);
   body.position.y = legLen;
   const tc = V(0, rad.y * 0.88, 0);
 
@@ -85,6 +100,18 @@ export function buildMonster(seed, spec = {}) {
     for (let i = 0; i < p.count; i++) {
       const z = p.getZ(i);
       if (z > 0) p.setZ(i, z * (1 + 0.25 * Math.max(0, 1 - Math.abs(p.getY(i) / rad.y + 0.15) * 1.6)));
+    }
+  }
+  if (plan === 'jelly') { // a bell: domed top, flat frilly underside
+    const p = torsoGeo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i);
+      if (y < 0) {
+        p.setY(i, y * 0.28);
+        const a = Math.atan2(p.getZ(i), p.getX(i));
+        const frill = 1 + Math.sin(a * 9) * 0.05;
+        p.setX(i, p.getX(i) * frill); p.setZ(i, p.getZ(i) * frill);
+      }
     }
   }
   lumpy(torsoGeo, 0.014, 4.5, seed % 997);
@@ -108,6 +135,20 @@ export function buildMonster(seed, spec = {}) {
     body.add(stitches(ringSamples(tc.clone().add(V(0, rad.y * 0.8, 0)), V(0, 1, 0), Math.min(upper.x, rad.x) * 0.92, 14), { len: 0.05, mat: threadMat }));
     topC = uc.clone().add(V(0, upper.y * 0.9, 0));
     topRad = upper;
+    for (let k = 0, extra = plan === 'tower' ? vr.int(1, 2) : 0; k < extra; k++) {
+      const s2 = Math.min(topRad.x, topRad.z) * vr.float(0.72, 0.95);
+      const up2 = V(s2, s2 * vr.float(0.8, 1.1), s2 * 0.95);
+      const g2 = new THREE.SphereGeometry(1, 22, 16);
+      g2.scale(up2.x, up2.y, up2.z);
+      lumpy(g2, 0.012, 5, seed % 977 + k);
+      const c2 = topC.clone().add(V(vr.float(-0.04, 0.04), up2.y * 0.55, 0));
+      const m2 = mesh(g2, M(donor()));
+      m2.position.copy(c2);
+      body.add(m2);
+      body.add(stitches(ringSamples(topC.clone(), V(0, 1, 0), Math.min(up2.x, topRad.x) * 0.9, 12), { len: 0.045, mat: threadMat }));
+      topC = c2.clone().add(V(0, up2.y * 0.9, 0));
+      topRad = up2;
+    }
   }
 
   // Patches of donor skin, sewn on.
@@ -163,6 +204,8 @@ export function buildMonster(seed, spec = {}) {
     body.add(stitches(ringSamples(s.p, s.n, hr * 1.15, 12).map((q) => ({ ...q, n: s.n.clone(), t: q.t })), { len: 0.035, cross: false, mat: threadMat }));
   }
 
+  const updaters = [];
+
   // --- legs ------------------------------------------------------------------
   const legs = [];
   const hipPts = {
@@ -171,7 +214,8 @@ export function buildMonster(seed, spec = {}) {
     3: [V(-0.6, 0, 0.1), V(0, 0, -0.2), V(0.6, 0, 0.1)],
     4: [V(-0.55, 0, 0.45), V(0.55, 0, 0.45), V(-0.55, 0, -0.45), V(0.55, 0, -0.45)],
     6: [V(-0.65, 0, 0.5), V(0.65, 0, 0.5), V(-0.7, 0, 0), V(0.7, 0, 0), V(-0.65, 0, -0.5), V(0.65, 0, -0.5)],
-  }[legCount];
+  }[legCount] || [];
+  if (plan === 'spider') spiderLegs({ vr, body, tc, rad, legLen, skinMat, toothMat, legs, M, donor });
   const legR = THREE.MathUtils.clamp(r.float(0.035, 0.085) * (legCount === 1 ? 1.6 : 1), 0.03, 0.13);
   const limp = r.chance(0.25) ? r.int(0, legCount - 1) : -1;
   hipPts.forEach((h, i) => {
@@ -316,19 +360,31 @@ export function buildMonster(seed, spec = {}) {
   const heads = [];
   const eyes = [];
   const mouths = [];
-  const headCount = r.weighted(W('heads', [[0, 1.3], [1, 5], [2, 1.1]]));
+  let headCount = r.weighted(W('heads', [[0, 1.3], [1, 5], [2, 1.1]]));
+  if (plan === 'hydra') headCount = vr.weighted([[2, 3], [3, 2], [4, 0.8]]);
+  if (plan === 'jelly') headCount = 0;
   const faces = [];
   if (headCount === 0) {
     faces.push({ parent: torso, c: V(), r: rad, isTorso: true });
   }
   for (let h = 0; h < headCount; h++) {
-    const hr = r.float(0.12, 0.26) * (headCount === 2 ? 0.8 : 1);
+    const hr = r.float(0.12, 0.26) * (headCount === 2 ? 0.8 : 1) * (plan === 'hydra' ? 0.85 : 1);
     const hrad = V(hr * r.float(0.9, 1.3), hr * r.float(0.85, 1.25), hr * r.float(0.85, 1.05));
     const pivot = new THREE.Group();
     const xoff = headCount === 2 ? (h === 0 ? -1 : 1) * topRad.x * 0.5 : r.float(-0.04, 0.04);
     pivot.position.copy(topC).add(V(xoff, -0.02, topRad.z * 0.1));
     pivot.rotation.z = headCount === 2 ? (h === 0 ? 0.25 : -0.25) : 0;
-    const neckLen = r.chance(0.4) ? r.float(0.05, 0.16) : 0.0;
+    let neckLen = r.chance(0.4) ? r.float(0.05, 0.16) : 0.0;
+    if (plan === 'hydra') {
+      // Necks fan out from the shoulders and sway on their own.
+      const a = (h / (headCount - 1) - 0.5) * 2;
+      neckLen = vr.float(0.2, 0.42) * (1 - Math.abs(a) * 0.2);
+      pivot.position.copy(topC).add(V(a * topRad.x * 0.55, -0.04, topRad.z * 0.05 - Math.abs(a) * 0.03));
+      const base = -a * vr.float(0.45, 0.7);
+      pivot.rotation.z = base;
+      const ph = vr.float(0, 6.28), sp = vr.float(0.9, 1.6);
+      updaters.push((t) => { pivot.rotation.z = base + Math.sin(t * sp + ph) * 0.13; pivot.rotation.x = Math.sin(t * sp * 0.7 + ph) * 0.08; });
+    }
     if (neckLen > 0) {
       const neck = mesh(sausage(neckLen + hr * 0.5, [hr * 0.35, hr * 0.3]), skinMat);
       neck.rotation.x = Math.PI; // grow upward
@@ -553,13 +609,20 @@ export function buildMonster(seed, spec = {}) {
     }
   }
 
+  // --- body-plan parts and extras (newer monsters only) ---------------------------
+  const ctx = { vr, body, tc, rad, skinMat, toothMat, threadMat, darkMat, M, donor, heads, eyes, mouths, updaters, legLen };
+  if (plan === 'flyer' || extras.includes('wings')) wings(ctx, plan === 'flyer' ? 1 : 0.55);
+  if (plan === 'jelly') jellyTentacles(ctx);
+  if (plan === 'serpent') serpentCoil(ctx);
+  for (const x of extras) EXTRAS[x]?.(ctx);
+
   // --- normalise size -------------------------------------------------------------
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   const h = box.max.y - box.min.y;
-  const target = r.float(0.75, 1.15);
+  const target = r.float(0.75, 1.15) * sizeMul;
   // Fit within a height but also a width/depth budget so squat blobs stay table-sized.
-  const k = Math.min(target / h, 0.8 / (box.max.x - box.min.x), 0.62 / (box.max.z - box.min.z));
+  const k = Math.min(target / h, (0.8 * sizeMul) / (box.max.x - box.min.x), (0.62 * sizeMul) / (box.max.z - box.min.z));
   root.scale.setScalar(k);
   root.updateMatrixWorld(true);
   box.setFromObject(root);
@@ -588,18 +651,21 @@ export function buildMonster(seed, spec = {}) {
     chest, torsoRadii: rad,
   };
 
-  const gait = legCount === 1 ? 'hop' : legCount === 2 ? 'waddle' : 'scuttle';
+  const flies = plan === 'flyer' || plan === 'jelly';
+  const gait = flies ? 'fly' : plan === 'serpent' ? 'slither' : legCount === 1 ? 'hop' : legCount === 2 ? 'waddle' : 'scuttle';
+  // Fliers hover; the height is in the body's unscaled units.
+  const hover = flies ? vr.float(0.22, 0.45) / k : 0;
   const monster = {
     seed, root, body, torso, torsoCenter: tc, torsoRadii: rad, legs, arms, heads, eyes, mouths, tail,
-    mats, gait, scale: k, bodyLift: legLen,
-    height: box.max.y - box.min.y,
+    mats, gait, scale: k, bodyLift: legLen, hover, hoverBob: flies ? 0.05 / k : 0, plan, size: sizeMul,
+    height: box.max.y - box.min.y + hover * k,
     width: box.max.x - box.min.x,
     back: -box.min.z,
     front: box.max.z,
     speed: r.float(0.6, 1.4) * (gait === 'scuttle' ? 1.3 : 1),
     blinkRate: r.float(2, 6),
     personality: r.float(0, 1),
-    anchors, updaters: [], theme: spec.id || null,
+    anchors, updaters, theme: spec.id || null,
   };
   if (spec.decorate) spec.decorate({ m: monster, r, anchors, M });
   // Frankenstein limbs (tools) as sewn-on body parts; they animate while active.
@@ -673,3 +739,254 @@ export function disposeMonster(monster) {
   });
   for (const m of monster.mats) m.dispose();
 }
+
+// ---------------------------------------------------------------- variety
+const PLANS = [['classic', 4], ['hydra', 1.2], ['flyer', 1.2], ['jelly', 0.8], ['spider', 0.9], ['serpent', 0.8], ['tower', 0.8]];
+const SIZES = [
+  [(r) => r.float(0.5, 0.65), 1],
+  [() => 1, 3.5],
+  [(r) => r.float(1.2, 1.45), 1.4],
+  [(r) => r.float(1.6, 1.95), 0.6],
+];
+
+function pickExtras(vr, plan) {
+  const pool = ['eyestalks', 'bellyMouth', 'candles', 'cog', 'mushrooms', 'chimney', 'wings'].filter((x) => !(x === 'wings' && plan === 'flyer'));
+  const out = [];
+  const n = vr.weighted([[0, 2], [1, 3], [2, 1.5]]);
+  while (out.length < n) {
+    const x = vr.pick(pool);
+    if (!out.includes(x)) out.push(x);
+  }
+  return out;
+}
+
+// A sausage limb from a to b, in the parent's space.
+function bone(a, b, radii, mat) {
+  const d = b.clone().sub(a);
+  const m = mesh(sausage(d.length(), radii), mat);
+  m.position.copy(a);
+  m.quaternion.setFromUnitVectors(V(0, -1, 0), d.normalize());
+  return m;
+}
+
+// Bat-like stitched wings on the upper back. Full-size wings flap fast (the
+// monster flies); small ones on a walker just twitch.
+function wings({ vr, body, tc, rad, M, donor, threadMat, updaters }, scale) {
+  const span = Math.max(rad.x, rad.y) * vr.float(2.3, 3.1) * scale;
+  const membrane = M(vr.chance(0.5) ? donor() : vr.pick([0x4a3a3a, 0x3a4a3a, 0x5a3a5a, 0x6a5a40]), { rough: 0.9 });
+  membrane.side = THREE.DoubleSide;
+  const boneMat = M(0xe8dcc0, { rough: 0.6 });
+  const fast = scale >= 1;
+  for (const side of [-1, 1]) {
+    const s = onEllipsoid(tc, rad, side * 1.95, 0.4, 0.9);
+    const mount = new THREE.Group();
+    mount.position.copy(s.p);
+    mount.scale.x = side;
+    const flap = new THREE.Group();
+    mount.add(flap);
+    const elbow = V(span * 0.42, span * 0.32, -span * 0.05);
+    const tips = [V(span, span * 0.18, -span * 0.1), V(span * 0.82, -span * 0.25, -span * 0.08), V(span * 0.5, -span * 0.48, -span * 0.04)];
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(elbow.x, elbow.y);
+    shape.lineTo(tips[0].x, tips[0].y);
+    for (let k = 1; k < tips.length; k++) {
+      const a = tips[k - 1], b = tips[k];
+      shape.quadraticCurveTo((a.x + b.x) / 2 - span * 0.08, (a.y + b.y) / 2 + span * 0.04, b.x, b.y);
+    }
+    shape.quadraticCurveTo(span * 0.25, -span * 0.3, span * 0.06, -span * 0.22);
+    shape.lineTo(0, 0);
+    const mem = mesh(new THREE.ShapeGeometry(shape, 10), membrane);
+    mem.position.z = -span * 0.06;
+    flap.add(mem);
+    const br = span * 0.035;
+    flap.add(bone(V(), elbow, [br, br * 0.8], boneMat));
+    for (const tip of tips) flap.add(bone(elbow, tip, [br * 0.8, br * 0.35], boneMat));
+    const seam = [V(span * 0.1, 0, 0), elbow, tips[0]];
+    flap.add(stitches(seam.map((p, i) => ({ p: p.clone().setZ(-span * 0.05), n: V(0, 0, 1), t: (seam[i + 1] || p).clone().sub(seam[i - 1] || p).normalize() })), { len: 0.03, mat: threadMat }));
+    body.add(mount);
+    const ph = vr.float(0, 1);
+    updaters.push((t, st) => {
+      const rate = fast ? 7 + (st.walk || 0) * 5 : 1.5;
+      flap.rotation.z = (fast ? 0.15 : 0.35) + Math.sin(t * rate + ph) * (fast ? 0.55 : 0.12);
+      flap.rotation.y = 0.12 + Math.sin(t * rate + ph + 1) * (fast ? 0.15 : 0.05);
+    });
+  }
+}
+
+function jellyTentacles({ vr, body, tc, rad, M, donor, skinMat, updaters }) {
+  const n = vr.int(6, 10);
+  const mat = vr.chance(0.5) ? skinMat : M(donor());
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + vr.float(-0.2, 0.2);
+    const root = new THREE.Group();
+    root.position.copy(tc).add(V(Math.sin(a) * rad.x * 0.62, -rad.y * 0.22, Math.cos(a) * rad.z * 0.62));
+    let parent = root, r0 = rad.x * vr.float(0.07, 0.11);
+    const len = vr.float(0.09, 0.14);
+    const segs = [];
+    for (let k = 0; k < 6; k++) {
+      const seg = new THREE.Group();
+      seg.position.y = k === 0 ? 0 : -len * 0.92;
+      seg.add(mesh(sausage(len, [r0, r0 * 0.8]), mat));
+      parent.add(seg);
+      segs.push(seg);
+      parent = seg;
+      r0 *= 0.8;
+    }
+    body.add(root);
+    const ph = vr.float(0, 6.28);
+    updaters.push((t) => segs.forEach((seg, k) => { seg.rotation.x = Math.sin(t * 2.2 + ph + k * 0.7) * 0.22; seg.rotation.z = Math.cos(t * 1.7 + ph + k * 0.5) * 0.18; }));
+  }
+}
+
+// A thick tail coiled on the floor carries the upright body.
+function serpentCoil({ vr, body, rad, skinMat, M, donor, legLen, updaters }) {
+  const mat = vr.chance(0.6) ? skinMat : M(donor());
+  const coil = new THREE.Group();
+  const base = Math.max(rad.x, rad.y * 0.55);
+  const turns = vr.float(1.2, 1.8);
+  const N = 26;
+  const thick = (t) => base * 0.42 * (1 - t * 0.75);
+  const pts = [V(0, 0, 0)];
+  for (let i = 1; i <= N; i++) {
+    const t = i / N;
+    const a = t * turns * Math.PI * 2;
+    const R = base * (1.7 - t * 1.1);
+    // The coil lies on the floor (body space y = -legLen).
+    pts.push(V(Math.sin(a) * R, -legLen + thick(t), Math.cos(a) * R - base * 0.35));
+  }
+  for (let i = 0; i < N; i++) coil.add(bone(pts[i], pts[i + 1], [thick(i / N), thick((i + 1) / N)], mat));
+  body.add(coil);
+  const ph = vr.float(0, 6.28);
+  updaters.push((t) => { coil.rotation.y = Math.sin(t * 0.8 + ph) * 0.12; });
+}
+
+function spiderLegs({ vr, body, tc, rad, legLen, skinMat, toothMat, legs, M, donor }) {
+  const mat = vr.chance(0.4) ? M(donor()) : skinMat;
+  const azs = [0.65, 1.15, 1.75, 2.35].flatMap((a) => [a, -a]);
+  azs.forEach((az, i) => {
+    const hip = onEllipsoid(tc, rad, az, -0.15, 0.9).p;
+    const pivot = new THREE.Group();
+    pivot.position.copy(hip);
+    pivot.rotation.y = az;
+    const L1 = vr.float(0.18, 0.28);
+    const knee = V(0, L1 * 0.55, L1 * 0.85);
+    // Feet land on the floor: body space y = -legLen.
+    const foot = V(0, -legLen - hip.y, knee.z + L1 * 0.35);
+    const lr = vr.float(0.025, 0.04);
+    pivot.add(bone(V(), knee, [lr, lr * 0.85], mat));
+    pivot.add(bone(knee, foot, [lr * 0.85, lr * 0.4], mat));
+    const claw = mesh(new THREE.ConeGeometry(lr * 0.6, lr * 2.4, 6), toothMat);
+    claw.position.copy(foot);
+    claw.rotation.x = Math.PI;
+    pivot.add(claw);
+    body.add(pivot);
+    legs.push({ pivot, phase: (i % 2) * Math.PI + Math.floor(i / 2) * 0.8, len: L1, kind: 'leg' });
+  });
+}
+
+const EXTRAS = {
+  eyestalks({ vr, body, tc, rad, heads, eyes, skinMat }) {
+    const top = heads[0]?.head || body;
+    const c = heads[0] ? V(0, heads[0].rad.y * 0.8, 0) : tc.clone().add(V(0, rad.y * 0.85, 0));
+    const n = vr.int(2, 4);
+    for (let i = 0; i < n; i++) {
+      const a = (i / Math.max(1, n - 1) - 0.5) * 1.6;
+      const end = c.clone().add(V(Math.sin(a) * 0.12, vr.float(0.12, 0.22), vr.float(-0.02, 0.04)));
+      top.add(bone(c, end, [0.012, 0.009], skinMat));
+      const eye = buildEye(vr, vr.float(0.03, 0.045), skinMat);
+      eye.group.position.copy(end);
+      top.add(eye.group);
+      eyes.push(eye);
+    }
+  },
+  // A second mouth in the belly; it lip-syncs along with the face.
+  bellyMouth({ vr, body, tc, rad, darkMat, toothMat, mouths }) {
+    const s = onEllipsoid(tc, rad, 0, -0.2, 0.97);
+    const mouth = new THREE.Group();
+    mouth.position.copy(s.p);
+    orientTo(mouth, s.n);
+    const mw = rad.x * vr.float(0.35, 0.5), mh = rad.y * 0.1;
+    const cavity = mesh(new THREE.SphereGeometry(1, 16, 10), darkMat, { cast: false });
+    cavity.scale.set(mw, mh, Math.min(mw, mh) * 0.5 + 0.01);
+    mouth.add(cavity);
+    for (let k = 0; k < 6; k++) {
+      const tooth = mesh(new THREE.ConeGeometry(mw * 0.1, mh * 1.4, 5), toothMat, { cast: false });
+      tooth.position.set((k / 5 - 0.5) * mw * 1.5, (k % 2 ? -1 : 1) * mh * 0.5, mh * 0.3);
+      tooth.rotation.x = k % 2 ? 0 : Math.PI;
+      mouth.add(tooth);
+    }
+    body.add(mouth);
+    mouths.push({ group: mouth, cavity, baseY: cavity.scale.y, type: 'belly' });
+  },
+  candles({ vr, body, tc, rad, heads, updaters }) {
+    const top = heads[0]?.head || body;
+    const c = heads[0] ? V(0, heads[0].rad.y * 0.85, 0) : tc.clone().add(V(0, rad.y * 0.9, 0));
+    const n = vr.int(2, 4);
+    for (let i = 0; i < n; i++) {
+      const candle = new THREE.Group();
+      candle.position.copy(c).add(V((i - (n - 1) / 2) * 0.05, 0, vr.float(-0.03, 0.03)));
+      const h = vr.float(0.05, 0.1);
+      const wax = mesh(new THREE.CylinderGeometry(0.013, 0.015, h, 8), clay(0xf0e8c8, { rough: 0.6 }));
+      wax.position.y = h / 2;
+      candle.add(wax);
+      const flame = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc040 }));
+      flame.position.y = h + 0.018;
+      candle.add(flame);
+      top.add(candle);
+      const ph = vr.float(0, 6.28);
+      updaters.push((t) => { const f = 0.8 + Math.abs(Math.sin(t * 13 + ph)) * 0.35; flame.scale.set(f, 1.8 * f, f); });
+    }
+  },
+  cog({ vr, body, tc, rad, updaters }) {
+    const s = onEllipsoid(tc, rad, Math.PI, vr.float(0, 0.4), 1.0);
+    const g = new THREE.Group();
+    g.position.copy(s.p);
+    orientTo(g, s.n);
+    const R = Math.min(rad.x, rad.y) * vr.float(0.35, 0.5);
+    const wheel = new THREE.Group();
+    wheel.add(mesh(new THREE.CylinderGeometry(R, R, R * 0.25, 18), metal(0xb8893a)));
+    for (let k = 0; k < 10; k++) {
+      const tooth = mesh(new THREE.BoxGeometry(R * 0.22, R * 0.25, R * 0.3), metal(0xb8893a));
+      const a = (k / 10) * Math.PI * 2;
+      tooth.position.set(Math.cos(a) * R, 0, Math.sin(a) * R);
+      tooth.rotation.y = -a;
+      wheel.add(tooth);
+    }
+    wheel.rotation.x = Math.PI / 2;
+    g.add(wheel);
+    body.add(g);
+    updaters.push((t) => { wheel.rotation.y = t * 0.8; });
+  },
+  mushrooms({ vr, body, tc, rad }) {
+    const n = vr.int(2, 5);
+    for (let i = 0; i < n; i++) {
+      const s = onEllipsoid(tc, rad, vr.float(-2.4, 2.4), vr.float(0.35, 0.8), 0.98);
+      const m = new THREE.Group();
+      m.position.copy(s.p);
+      m.quaternion.setFromUnitVectors(V(0, 1, 0), s.n);
+      const h = vr.float(0.03, 0.07);
+      const stem = mesh(new THREE.CylinderGeometry(0.008, 0.012, h, 6), clay(0xeee3c0));
+      stem.position.y = h / 2;
+      m.add(stem);
+      const cap = mesh(new THREE.SphereGeometry(vr.float(0.02, 0.04), 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), clay(vr.pick([0xc0392b, 0xd8a24a, 0x8a5a9a])));
+      cap.position.y = h;
+      m.add(cap);
+      body.add(m);
+    }
+  },
+  chimney({ vr, body, tc, rad }) {
+    const s = onEllipsoid(tc, rad, Math.PI + vr.float(-0.4, 0.4), 0.6, 0.95);
+    const pipe = new THREE.Group();
+    pipe.position.copy(s.p);
+    pipe.rotation.z = vr.float(-0.3, 0.3);
+    const len = rad.y * vr.float(0.7, 1.1);
+    const p = mesh(new THREE.CylinderGeometry(0.035, 0.04, len, 10), metal(0x3a3632, { rough: 0.6 }));
+    p.position.y = len / 2;
+    pipe.add(p);
+    const lip = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 10), metal(0x2a2622));
+    lip.position.y = len;
+    pipe.add(lip);
+    body.add(pipe);
+  },
+};

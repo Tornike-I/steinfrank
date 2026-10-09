@@ -6,21 +6,24 @@
 export function animateMonster(m, t, s) {
   const walk = s.walk || 0, ph = s.phase || 0, ex = s.excite || 0;
   const verb = s.verb || null, w = verb ? (s.verbW ?? 1) : 0;
-  const bob = m.gait === 'hop' ? 0 : Math.abs(Math.sin(ph)) * 0.04 * walk;
+  const flying = m.gait === 'fly';
+  const bob = m.gait === 'hop' || flying ? 0 : Math.abs(Math.sin(ph)) * 0.04 * walk;
+  const hover = flying ? m.hover + Math.sin(t * 2.1 + m.personality * 5) * m.hoverBob : 0;
   let lean = 0, hop = 0, shiver = 0;
   if (verb === 'compute') shiver = Math.sin(t * 40) * 0.02 * w;
   if (verb === 'cheer' || verb === 'greet') hop = Math.abs(Math.sin(t * 7)) * 0.06 * w;
   if (verb === 'read' || verb === 'write') lean = 0.12 * w;
   if (verb === 'sad') lean = 0.25 * w;
   if (verb === 'look') lean = -0.08 * w;
-  m.body.position.y = m.bodyLift + bob + hop;
-  m.body.rotation.z = Math.sin(ph) * (m.gait === 'waddle' ? 0.12 : 0.05) * walk + Math.sin(t * 1.3 + m.personality * 6) * 0.02 + shiver;
+  m.body.position.y = m.bodyLift + hover + bob + hop;
+  const sway = m.gait === 'waddle' ? 0.12 : m.gait === 'slither' ? 0.2 : 0.05;
+  m.body.rotation.z = Math.sin(ph) * sway * walk + Math.sin(t * 1.3 + m.personality * 6) * (m.gait === 'slither' ? 0.06 : 0.02) + shiver;
   m.body.rotation.x = (m.gait === 'scuttle' ? 0.06 : 0.1) * walk + lean;
   const breathe = 1 + Math.sin(t * 2.2 + m.personality * 5) * 0.02;
   m.torso.scale.set(1 / Math.sqrt(breathe), breathe, 1 / Math.sqrt(breathe));
 
   for (const leg of m.legs) {
-    leg.pivot.rotation.x = Math.sin(ph + leg.phase) * 0.6 * walk;
+    leg.pivot.rotation.x = flying ? 0.35 + Math.sin(t * 2 + leg.phase) * 0.15 : Math.sin(ph + leg.phase) * 0.6 * walk;
   }
   m.arms.forEach((a, i) => {
     const swing = -Math.sin(ph + a.phase) * 0.45 * walk;

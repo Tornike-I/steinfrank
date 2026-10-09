@@ -30,6 +30,7 @@ export function draftAssistant(topic, job = '') {
     theme: topic,
     name: makeName(topic, new Rng(seed)),
     seed,
+    form: 2,
     job,
     instructions: th.instructions,
     provider: { kind: 'scripted', model: null, endpoint: null },
@@ -54,9 +55,10 @@ export function commitAssistant(draft) {
 
 // Build the 3D monster for an assistant (or a bare seed + topic).
 // `limbs` (Frankenstein limb names) become sewn-on body parts.
-export function buildFor(defOrSeed, themeId, limbs) {
-  if (typeof defOrSeed === 'number') return buildMonster(defOrSeed, { ...(themeId ? specOf(themeId) : {}), limbs: limbs || [] });
-  return buildMonster(defOrSeed.seed, { ...specOf(defOrSeed.theme), limbs: defOrSeed.limbs || [] });
+// `form` 2+ enables the wider variety of body plans and sizes.
+export function buildFor(defOrSeed, themeId, limbs, form = 1) {
+  if (typeof defOrSeed === 'number') return buildMonster(defOrSeed, { ...(themeId ? specOf(themeId) : {}), limbs: limbs || [], variety: form >= 2 });
+  return buildMonster(defOrSeed.seed, { ...specOf(defOrSeed.theme), limbs: defOrSeed.limbs || [], variety: (defOrSeed.form || 1) >= 2 });
 }
 
 // What the monster is for, as shown in tabs and headers.

@@ -357,7 +357,7 @@ export class Director {
     this._shot('floor', { speed: 2.0 });
     this.sfx.play('squeak');
     this.reveal = null;
-    const rec = { id: op.monsterId, seed: op.seed, defId: op.def.id, theme: op.def.theme, name: themeLabel(op.def), limbs: op.def.limbs || [] };
+    const rec = { id: op.monsterId, seed: op.seed, defId: op.def.id, theme: op.def.theme, name: themeLabel(op.def), limbs: op.def.limbs || [], form: op.def.form || 1 };
     this.sci.obstacles = [TABLE_BOX]; // the monster is leaving the slab
     const landed = this.creatures.adopt(rec, patient);
     this.onMonsterBorn?.(rec);

@@ -54,7 +54,7 @@ export class LabCreatures {
 
   // ----------------------------------------------------------- creation
   _make(rec, monster = null) {
-    const m = monster || buildFor(rec.seed, rec.theme, rec.limbs);
+    const m = monster || buildFor(rec.seed, rec.theme, rec.limbs, rec.form);
     m.root.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
     const group = new THREE.Group();
     const tilt = new THREE.Group();
@@ -70,7 +70,7 @@ export class LabCreatures {
     if (label) group.add(label);
     this.scene.add(group);
     const c = {
-      id: rec.id, seed: rec.seed, defId: rec.defId || null, theme: rec.theme || null, name: rec.name || null, limbs: rec.limbs || [],
+      id: rec.id, seed: rec.seed, defId: rec.defId || null, theme: rec.theme || null, name: rec.name || null, limbs: rec.limbs || [], form: rec.form || 1,
       m, group, tilt, blob, label,
       pos: V(), yaw: 0, yawT: 0, state: 'alive', mode: 'idle', timer: 1 + Math.random() * 2, target: null,
       phase: Math.random() * 6, walk: 0, excite: 0, t: Math.random() * 10, flies: [], side: 1,
@@ -96,7 +96,7 @@ export class LabCreatures {
       if (c.state === 'dissolving' || c.temporary) continue;
       const dead = c.state === 'dead' || c.state === 'flung';
       const p = c.state === 'arriving' ? c.arrive.to : c.state === 'summoned' || c.state === 'returning' ? c.sum.home : c.pos;
-      out.push({ id: c.id, seed: c.seed, defId: c.defId, theme: c.theme, name: c.name, limbs: c.limbs, state: dead ? 'dead' : 'alive', x: +p.x.toFixed(3), z: +p.z.toFixed(3), yaw: +c.yaw.toFixed(2), side: c.side });
+      out.push({ id: c.id, seed: c.seed, defId: c.defId, theme: c.theme, name: c.name, limbs: c.limbs, form: c.form, state: dead ? 'dead' : 'alive', x: +p.x.toFixed(3), z: +p.z.toFixed(3), yaw: +c.yaw.toFixed(2), side: c.side });
     }
     return out;
   }
